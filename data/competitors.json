@@ -56,5 +56,16 @@
       "isFirstRun": false
     },
     "createdAt": "2026-09-25T16:05:11.140Z"
+  },
+  {
+    "id": "comp_1790353501296_mrlal",
+    "name": "Pure Pet Food",
+    "sitemapUrl": "https://www.purepetfood.com/sitemap.xml",
+    "active": true,
+    "tags": [],
+    "totalUrls": 0,
+    "lastCheck": null,
+    "lastDiff": null,
+    "createdAt": "2026-09-25T16:25:01.297Z"
   }
 ]

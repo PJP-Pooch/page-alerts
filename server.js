@@ -251,6 +251,15 @@ app.get('/api/history', async (req, res) => {
   }
 });
 
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error('[PageAlerts Express Error]:', err);
+  res.status(500).json({
+    error: err.message || 'Internal Server Error',
+    stack: err.stack || null
+  });
+});
+
 // Start scheduler when running as a persistent Node server
 if (!process.env.VERCEL) {
   scheduler.initScheduler();
