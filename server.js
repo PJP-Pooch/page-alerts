@@ -28,7 +28,7 @@ app.get('/api/stats', async (req, res) => {
   try {
     const competitors = await storage.getCompetitors();
     const settings = await storage.getSettings();
-    const schedulerStatus = scheduler.getSchedulerStatus();
+    const schedulerStatus = scheduler.getSchedulerStatus(settings);
     const history = await storage.getHistory(1);
     const latestRun = history[0] || null;
 
