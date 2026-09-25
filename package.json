@@ -8,6 +8,7 @@
     "dev": "node server.js",
     "check": "node cli.js check",
     "dry-run": "node cli.js check --dry-run",
+    "projects": "node cli.js projects",
     "list": "node cli.js list",
     "test-slack": "node cli.js test-slack"
   },

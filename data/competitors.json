@@ -10,16 +10,18 @@
       "Shopify"
     ],
     "totalUrls": 521,
-    "lastCheck": "2026-09-25T16:25:10.123Z",
+    "lastCheck": "2026-09-25T19:30:44.721Z",
     "lastDiff": {
       "added": [],
       "removed": [],
       "byCategory": {},
-      "modifiedCount": 319,
-      "timestamp": "2026-09-25T16:25:10.123Z",
+      "modifiedCount": 0,
+      "timestamp": "2026-09-25T18:52:38.130Z",
       "isFirstRun": false
     },
-    "createdAt": "2026-09-25T15:52:34.314Z"
+    "createdAt": "2026-09-25T15:52:34.314Z",
+    "projectId": "proj_default",
+    "siteType": "competitor"
   },
   {
     "id": "comp_1790351875340_kcgnu",
@@ -28,16 +30,18 @@
     "active": true,
     "tags": [],
     "totalUrls": 649,
-    "lastCheck": "2026-09-25T16:25:10.924Z",
+    "lastCheck": "2026-09-25T19:30:44.780Z",
     "lastDiff": {
       "added": [],
       "removed": [],
       "byCategory": {},
-      "modifiedCount": 49,
-      "timestamp": "2026-09-25T16:25:10.924Z",
+      "modifiedCount": 0,
+      "timestamp": "2026-09-25T18:49:51.753Z",
       "isFirstRun": false
     },
-    "createdAt": "2026-09-25T15:57:55.340Z"
+    "createdAt": "2026-09-25T15:57:55.340Z",
+    "projectId": "proj_default",
+    "siteType": "competitor"
   },
   {
     "id": "comp_1790352311140_9pgmo",
@@ -46,16 +50,18 @@
     "active": true,
     "tags": [],
     "totalUrls": 3310,
-    "lastCheck": "2026-09-25T16:25:11.366Z",
+    "lastCheck": "2026-09-25T19:30:44.833Z",
     "lastDiff": {
       "added": [],
       "removed": [],
       "byCategory": {},
       "modifiedCount": 0,
-      "timestamp": "2026-09-25T16:25:11.366Z",
+      "timestamp": "2026-09-25T18:49:52.553Z",
       "isFirstRun": false
     },
-    "createdAt": "2026-09-25T16:05:11.140Z"
+    "createdAt": "2026-09-25T16:05:11.140Z",
+    "projectId": "proj_default",
+    "siteType": "competitor"
   },
   {
     "id": "comp_1790353501296_mrlal",
@@ -64,14 +70,57 @@
     "active": true,
     "tags": [],
     "totalUrls": 596,
-    "lastCheck": "2026-09-25T16:25:12.456Z",
+    "lastCheck": "2026-09-25T19:30:44.906Z",
     "lastDiff": {
       "added": [],
       "removed": [],
+      "byCategory": {},
       "modifiedCount": 0,
-      "timestamp": "2026-09-25T16:25:12.456Z",
-      "isFirstRun": true
+      "timestamp": "2026-09-25T18:49:54.275Z",
+      "isFirstRun": false
     },
-    "createdAt": "2026-09-25T16:25:01.297Z"
+    "createdAt": "2026-09-25T16:25:01.297Z",
+    "projectId": "proj_default",
+    "siteType": "competitor"
+  },
+  {
+    "id": "comp_1790362055211_4tyvp",
+    "projectId": "proj_own",
+    "siteType": "own_site",
+    "name": "Pooch & Mutt",
+    "sitemapUrl": "https://www.poochandmutt.co.uk/sitemap.xml",
+    "active": true,
+    "tags": [],
+    "totalUrls": 674,
+    "lastCheck": "2026-09-25T19:30:15.206Z",
+    "lastDiff": {
+      "added": [],
+      "removed": [],
+      "byCategory": {},
+      "modifiedCount": 0,
+      "timestamp": "2026-09-25T18:49:54.841Z",
+      "isFirstRun": false
+    },
+    "createdAt": "2026-09-25T18:47:35.212Z"
+  },
+  {
+    "id": "comp_1790362077524_fb5qs",
+    "projectId": "proj_own",
+    "siteType": "own_site",
+    "name": "Franklin",
+    "sitemapUrl": "https://franklinpetfood.com/sitemap.xml",
+    "active": true,
+    "tags": [],
+    "totalUrls": 688,
+    "lastCheck": "2026-09-25T19:30:15.335Z",
+    "lastDiff": {
+      "added": [],
+      "removed": [],
+      "byCategory": {},
+      "modifiedCount": 0,
+      "timestamp": "2026-09-25T18:49:56.204Z",
+      "isFirstRun": false
+    },
+    "createdAt": "2026-09-25T18:47:57.524Z"
   }
 ]

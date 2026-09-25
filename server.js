@@ -147,7 +147,7 @@ app.get('/api/auth/callback', async (req, res) => {
           <div class="box">
             <h2>⛔ Access Restricted</h2>
             <p>You signed in as <span class="email">${profile.email}</span>.</p>
-            <p>PageAlerts is restricted to accounts with domain: <strong>@${auth.ALLOWED_DOMAIN}</strong>.</p>
+            <p>PageAlerts is restricted to accounts with these domains: ${auth.ALLOWED_DOMAIN.split(',').map(d => `<strong>@${d.trim().replace(/^@/, '')}</strong>`).join(' or ')}.</p>
             <a href="/api/auth/login" class="btn">Try Another Google Account</a>
           </div>
         </body>
@@ -193,10 +193,57 @@ app.use('/api', (req, res, next) => {
   auth.requireAuth(req, res, next);
 });
 
+// ================= PROJECTS API ROUTES =================
+
+app.get('/api/projects', async (req, res) => {
+  try {
+    const projects = await storage.getProjects();
+    res.json(projects);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects', async (req, res) => {
+  const { name, type, description, slackWebhookUrl, slackChannel } = req.body;
+  if (!name) return res.status(400).json({ error: 'Project name is required.' });
+
+  try {
+    const proj = await storage.addProject({ name, type, description, slackWebhookUrl, slackChannel });
+    res.status(201).json(proj);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/projects/:id', async (req, res) => {
+  try {
+    const updated = await storage.updateProject(req.params.id, req.body);
+    if (!updated) return res.status(404).json({ error: 'Project not found.' });
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/projects/:id', async (req, res) => {
+  try {
+    await storage.deleteProject(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // 1. Dashboard Overview Stats
 app.get('/api/stats', async (req, res) => {
   try {
-    const competitors = await storage.getCompetitors();
+    const { projectId } = req.query;
+    let competitors = await storage.getCompetitors();
+    if (projectId && projectId !== 'all') {
+      competitors = competitors.filter(c => c.projectId === projectId);
+    }
+
     const settings = await storage.getSettings();
     const schedulerStatus = scheduler.getSchedulerStatus(settings);
     const history = await storage.getHistory(1);
@@ -235,7 +282,11 @@ app.get('/api/stats', async (req, res) => {
 // 2. Competitors CRUD
 app.get('/api/competitors', async (req, res) => {
   try {
-    const competitors = await storage.getCompetitors();
+    const { projectId } = req.query;
+    let competitors = await storage.getCompetitors();
+    if (projectId && projectId !== 'all') {
+      competitors = competitors.filter(c => c.projectId === projectId);
+    }
     res.json(competitors);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -243,7 +294,7 @@ app.get('/api/competitors', async (req, res) => {
 });
 
 app.post('/api/competitors', async (req, res) => {
-  const { name, sitemapUrl, tags, active } = req.body;
+  const { name, sitemapUrl, tags, active, projectId, siteType } = req.body;
   if (!name || !sitemapUrl) {
     return res.status(400).json({ error: 'Name and sitemapUrl are required.' });
   }
@@ -255,7 +306,7 @@ app.post('/api/competitors', async (req, res) => {
   }
 
   try {
-    const comp = await storage.addCompetitor({ name, sitemapUrl, tags, active });
+    const comp = await storage.addCompetitor({ name, sitemapUrl, tags, active, projectId, siteType });
     res.status(201).json(comp);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -340,7 +391,7 @@ app.all(['/api/check/run', '/api/cron/check'], async (req, res) => {
     return res.status(409).json({ error: 'A sitemap check is already in progress. Please wait.' });
   }
 
-  const { competitorId } = req.body || {};
+  const { competitorId, projectId } = req.body || {};
   const isCron = req.path.includes('cron') || Boolean(req.headers['x-vercel-cron']);
   
   // Only send Slack if triggered by schedule/cron, or if explicitly requested
@@ -353,6 +404,7 @@ app.all(['/api/check/run', '/api/cron/check'], async (req, res) => {
   try {
     const result = await runner.runCheck({
       competitorId,
+      projectId,
       trigger: isCron ? 'scheduled' : 'manual',
       sendSlack: shouldSendSlack
     });
@@ -420,7 +472,8 @@ app.post('/api/slack/test', async (req, res) => {
 // 7. Audit & Crawl History
 app.get('/api/history', async (req, res) => {
   try {
-    const history = await storage.getHistory(50);
+    const { projectId } = req.query;
+    const history = await storage.getHistory(50, projectId);
     res.json(history);
   } catch (err) {
     res.status(500).json({ error: err.message });

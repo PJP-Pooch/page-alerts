@@ -231,11 +231,59 @@ body {
   margin-bottom: 30px;
 }
 
-.header-left h2 {
+.header-title-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.header-title-row h2 {
   font-size: 1.7rem;
   font-weight: 700;
   letter-spacing: -0.02em;
-  margin-bottom: 4px;
+  margin-bottom: 0;
+}
+
+.project-selector-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  padding: 4px 10px 4px 12px;
+  border-radius: var(--radius-full);
+  transition: var(--transition);
+}
+
+.project-selector-pill:hover {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(139, 92, 246, 0.55);
+}
+
+.project-pill-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #c4b5fd;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.project-pill-dropdown {
+  background: transparent;
+  color: #fff;
+  border: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  padding-right: 4px;
+}
+
+.project-pill-dropdown option {
+  background: #111827;
+  color: #f3f4f6;
 }
 
 .subtitle {
@@ -402,11 +450,15 @@ body {
   border-radius: var(--radius-full);
   font-size: 0.72rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .pill-green { background: var(--accent-green-bg); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.2); }
 .pill-red { background: var(--accent-red-bg); color: #fda4af; border: 1px solid rgba(244, 63, 94, 0.2); }
 .pill-cyan { background: rgba(6, 182, 212, 0.12); color: #67e8f9; border: 1px solid rgba(6, 182, 212, 0.2); }
+.pill-purple { background: rgba(139, 92, 246, 0.15); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.3); }
+.pill-orange { background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3); }
+.pill-blue { background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); }
 .pill-gray { background: rgba(255, 255, 255, 0.08); color: var(--text-muted); }
 
 /* Banners */
@@ -512,7 +564,12 @@ body {
 .data-table td a {
   color: var(--accent-cyan);
   text-decoration: none;
-  word-break: break-all;
+  display: inline-block;
+  max-width: 340px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
 }
 
 .data-table td a:hover {
@@ -735,6 +792,100 @@ body {
   display: flex;
   gap: 6px;
   margin-left: 12px;
+}
+
+.search-clear-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  transition: var(--transition);
+}
+
+.search-clear-btn:hover {
+  color: #fff;
+}
+
+/* Rich Diff Empty State Cards */
+.diff-empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 44px 24px;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-lg);
+  margin: 10px 0;
+  transition: var(--transition);
+}
+
+.diff-empty-card.clean-state {
+  background: radial-gradient(circle at center, rgba(16, 185, 129, 0.06) 0%, rgba(255, 255, 255, 0.01) 75%);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.diff-empty-card.clean-state .diff-empty-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.14);
+  color: var(--accent-green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+  box-shadow: 0 0 24px rgba(16, 185, 129, 0.15);
+}
+
+.diff-empty-card.search-empty .diff-empty-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.diff-empty-card h4 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+}
+
+.diff-empty-desc {
+  max-width: 500px;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.diff-empty-desc strong {
+  color: var(--text-main);
+}
+
+.diff-empty-meta-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.btn.disabled,
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* ================= Forms & Inputs ================= */

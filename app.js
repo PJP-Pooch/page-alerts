@@ -5,6 +5,8 @@
 // State
 let state = {
   stats: null,
+  projects: [],
+  currentProjectId: 'all',
   competitors: [],
   settings: null,
   activeTab: 'tab-dashboard',
@@ -15,12 +17,14 @@ let state = {
 
 // DOM Elements
 const elements = {
-  // Navigation
+  // Navigation & Header
   navItems: document.querySelectorAll('.nav-item'),
   tabPanes: document.querySelectorAll('.tab-pane'),
   pageTitle: document.getElementById('page-title'),
   pageSubtitle: document.getElementById('page-subtitle'),
+  headerProjectSelect: document.getElementById('header-project-select'),
   sidebarCompCount: document.getElementById('sidebar-comp-count'),
+  sidebarProjCount: document.getElementById('sidebar-proj-count'),
   schedulerBadgeText: document.getElementById('scheduler-badge-text'),
 
   // Top Actions
@@ -39,6 +43,23 @@ const elements = {
   dashCompetitorsTbody: document.getElementById('dash-competitors-tbody'),
   btnDashAddComp: document.getElementById('btn-dash-add-comp'),
 
+  // Projects Tab
+  projectsTbody: document.getElementById('projects-tbody'),
+  btnOpenAddProjectModal: document.getElementById('btn-open-add-project-modal'),
+
+  // Project Modal
+  modalProject: document.getElementById('modal-project'),
+  modalProjectTitle: document.getElementById('modal-project-title'),
+  projectForm: document.getElementById('project-form'),
+  projectIdInput: document.getElementById('project-id'),
+  projectNameInput: document.getElementById('project-name'),
+  projectTypeInput: document.getElementById('project-type'),
+  projectDescriptionInput: document.getElementById('project-description'),
+  projectSlackWebhookInput: document.getElementById('project-slack-webhook'),
+  projectSlackChannelInput: document.getElementById('project-slack-channel'),
+  btnCloseProjectModal: document.getElementById('btn-close-project-modal'),
+  btnCancelProjectModal: document.getElementById('btn-cancel-project-modal'),
+
   // Competitors Tab
   competitorsTbody: document.getElementById('competitors-tbody'),
   btnOpenAddCompModal: document.getElementById('btn-open-add-comp-modal'),
@@ -48,6 +69,8 @@ const elements = {
   modalCompTitle: document.getElementById('modal-comp-title'),
   competitorForm: document.getElementById('competitor-form'),
   compId: document.getElementById('comp-id'),
+  compProjectId: document.getElementById('comp-project-id'),
+  compSiteType: document.getElementById('comp-site-type'),
   compName: document.getElementById('comp-name'),
   compSitemapUrl: document.getElementById('comp-sitemap-url'),
   compTags: document.getElementById('comp-tags'),
@@ -81,6 +104,9 @@ const elements = {
 
   // Settings Tab
   slackSettingsForm: document.getElementById('slack-settings-form'),
+  slackScopeBanner: document.getElementById('slack-scope-banner'),
+  scheduleScopeBanner: document.getElementById('schedule-scope-banner'),
+  btnSaveSlack: document.getElementById('btn-save-slack'),
   slackWebhookUrl: document.getElementById('slack-webhook-url'),
   btnToggleWebhookVis: document.getElementById('btn-toggle-webhook-vis'),
   slackChannel: document.getElementById('slack-channel'),
@@ -155,7 +181,8 @@ async function checkAuthStatus() {
     const authDomainMsg = document.getElementById('auth-domain-msg');
 
     if (data.allowedDomain && authDomainMsg) {
-      authDomainMsg.textContent = `Sign in with your @${data.allowedDomain} Google Workspace account to access competitor change alerts.`;
+      const domains = data.allowedDomain.split(',').map(d => '@' + d.trim().replace(/^@/, ''));
+      authDomainMsg.textContent = `Sign in with your ${domains.join(' or ')} Google Workspace account to access competitor change alerts.`;
     }
 
     if (data.authConfigured && !data.authenticated) {
@@ -201,6 +228,7 @@ async function init() {
   const isAuthed = await checkAuthStatus();
   if (!isAuthed) return;
 
+  await loadProjects();
   await Promise.all([
     loadStats(),
     loadCompetitors(),
@@ -240,6 +268,26 @@ function setupNavigation() {
   elements.btnOpenAddCompModal.addEventListener('click', () => {
     openCompetitorModal();
   });
+
+  elements.btnOpenAddProjectModal?.addEventListener('click', () => {
+    openProjectModal();
+  });
+
+  // Header project filter selector
+  elements.headerProjectSelect?.addEventListener('change', async () => {
+    state.currentProjectId = elements.headerProjectSelect.value;
+    await Promise.all([loadStats(), loadCompetitors()]);
+
+    if (state.activeTab === 'tab-projects') {
+      renderProjectsTable(state.projects);
+    } else if (state.activeTab === 'tab-diff') {
+      await setupDiffExplorer();
+    } else if (state.activeTab === 'tab-history') {
+      await loadHistory();
+    } else if (state.activeTab === 'tab-settings') {
+      await loadSettings();
+    }
+  });
 }
 
 function switchTab(tabId) {
@@ -253,17 +301,23 @@ function switchTab(tabId) {
     pane.classList.toggle('active', pane.id === tabId);
   });
 
-  // Update header text
+  // Update header text and sync tab data
   if (tabId === 'tab-dashboard') {
     elements.pageTitle.textContent = 'Dashboard Overview';
-    elements.pageSubtitle.textContent = 'Tracking new & removed pages across competitor sitemaps';
+    elements.pageSubtitle.textContent = 'Tracking new & removed pages across competitor & internal sitemaps';
+    loadStats();
+    loadCompetitors();
+  } else if (tabId === 'tab-projects') {
+    elements.pageTitle.textContent = 'Projects & Workspaces';
+    elements.pageSubtitle.textContent = 'Organize monitored sites into client websites or own internal sites';
+    loadProjects();
   } else if (tabId === 'tab-competitors') {
-    elements.pageTitle.textContent = 'Competitor Sitemaps';
-    elements.pageSubtitle.textContent = 'Add, inspect, and configure competitor XML sitemaps to monitor';
+    elements.pageTitle.textContent = 'Monitored Sites';
+    elements.pageSubtitle.textContent = 'Add, inspect, and configure competitor & own XML sitemaps to monitor';
     loadCompetitors();
   } else if (tabId === 'tab-diff') {
     elements.pageTitle.textContent = 'Changes & Diffs Explorer';
-    elements.pageSubtitle.textContent = 'Analyze newly published and removed competitor URLs';
+    elements.pageSubtitle.textContent = 'Analyze newly published and removed sitemap URLs';
     setupDiffExplorer();
   } else if (tabId === 'tab-history') {
     elements.pageTitle.textContent = 'Crawl History & Audit';
@@ -278,9 +332,125 @@ function switchTab(tabId) {
 
 // ================= API Calls & Data Loaders =================
 
+async function loadProjects() {
+  try {
+    const res = await fetch('/api/projects');
+    const projects = await res.json();
+    state.projects = projects;
+
+    if (elements.sidebarProjCount) {
+      elements.sidebarProjCount.textContent = projects.length;
+    }
+
+    // Populate header project selector
+    const currentVal = state.currentProjectId || 'all';
+    elements.headerProjectSelect.innerHTML = '<option value="all">🌐 All Projects</option>';
+    projects.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      const icon = p.type === 'own_site' ? '🏠' : '🎯';
+      opt.textContent = `${icon} ${p.name}`;
+      if (p.id === currentVal) opt.selected = true;
+      elements.headerProjectSelect.appendChild(opt);
+    });
+
+    // Populate comp modal project dropdown
+    if (elements.compProjectId) {
+      elements.compProjectId.innerHTML = '';
+      projects.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        const icon = p.type === 'own_site' ? '🏠' : '🎯';
+        opt.textContent = `${icon} ${p.name}`;
+        elements.compProjectId.appendChild(opt);
+      });
+    }
+
+    renderProjectsTable(projects);
+  } catch (err) {
+    console.error('Failed to load projects:', err);
+  }
+}
+
+function renderProjectsTable(projects) {
+  if (!elements.projectsTbody) return;
+
+  if (projects.length === 0) {
+    elements.projectsTbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="text-center empty-state">No projects created yet. Click "Create Project" above!</td>
+      </tr>
+    `;
+    return;
+  }
+
+  let html = '';
+  projects.forEach(p => {
+    const isOwn = p.type === 'own_site';
+    const typeBadge = isOwn
+      ? '<span class="pill pill-cyan">🏠 Own Site</span>'
+      : '<span class="pill pill-purple">🎯 Competitor</span>';
+
+    const sitesCount = state.competitors.filter(c => c.projectId === p.id).length;
+    const slackRouting = p.slackWebhookUrl
+      ? `<span class="pill pill-green" title="${escapeHtml(p.slackChannel || 'Custom Webhook')}">Dedicated Slack ✅</span>`
+      : '<span class="pill pill-gray">Global Default</span>';
+
+    html += `
+      <tr>
+        <td>${typeBadge}</td>
+        <td>
+          <strong>${escapeHtml(p.name)}</strong>
+          ${state.currentProjectId === p.id ? '<span class="pill pill-cyan" style="margin-left: 6px;">Active Filter</span>' : ''}
+        </td>
+        <td>${escapeHtml(p.description || '-')}</td>
+        <td>
+          <strong>${sitesCount}</strong> site(s)
+          <button class="btn btn-secondary btn-xs btn-filter-project" data-id="${p.id}" style="margin-left: 8px;">View Sites</button>
+        </td>
+        <td>${slackRouting}</td>
+        <td>
+          <div class="table-actions">
+            <button class="btn btn-secondary btn-xs btn-edit-project" data-id="${p.id}" title="Edit project">Edit</button>
+            <button class="btn btn-danger-outline btn-xs btn-delete-project" data-id="${p.id}" title="Delete project">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  });
+
+  elements.projectsTbody.innerHTML = html;
+
+  elements.projectsTbody.querySelectorAll('.btn-filter-project').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pId = btn.getAttribute('data-id');
+      elements.headerProjectSelect.value = pId;
+      state.currentProjectId = pId;
+      switchTab('tab-competitors');
+      loadStats();
+      loadCompetitors();
+    });
+  });
+
+  elements.projectsTbody.querySelectorAll('.btn-edit-project').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pId = btn.getAttribute('data-id');
+      const proj = state.projects.find(p => p.id === pId);
+      if (proj) openProjectModal(proj);
+    });
+  });
+
+  elements.projectsTbody.querySelectorAll('.btn-delete-project').forEach(btn => {
+    btn.addEventListener('click', () => {
+      deleteProject(btn.getAttribute('data-id'));
+    });
+  });
+}
+
 async function loadStats() {
   try {
-    const res = await fetch('/api/stats');
+    const q = state.currentProjectId && state.currentProjectId !== 'all' ? `?projectId=${encodeURIComponent(state.currentProjectId)}` : '';
+    const res = await fetch(`/api/stats${q}`);
     const data = await res.json();
     state.stats = data;
 
@@ -318,13 +488,17 @@ async function loadStats() {
 
 async function loadCompetitors() {
   try {
-    const res = await fetch('/api/competitors');
+    const q = state.currentProjectId && state.currentProjectId !== 'all' ? `?projectId=${encodeURIComponent(state.currentProjectId)}` : '';
+    const res = await fetch(`/api/competitors${q}`);
     const competitors = await res.json();
     state.competitors = competitors;
 
     renderDashboardCompetitors(competitors);
     renderCompetitorsList(competitors);
     elements.sidebarCompCount.textContent = competitors.length;
+    if (state.activeTab === 'tab-projects') {
+      renderProjectsTable(state.projects);
+    }
   } catch (err) {
     console.error('Failed to load competitors:', err);
   }
@@ -335,7 +509,7 @@ function renderDashboardCompetitors(competitors) {
     elements.dashCompetitorsTbody.innerHTML = `
       <tr>
         <td colspan="6" class="text-center empty-state">
-          No competitors added yet. Click <strong>"Add Competitor"</strong> to start tracking sitemaps.
+          No sites found for this view. Click <strong>"Add Site"</strong> to start tracking sitemaps.
         </td>
       </tr>
     `;
@@ -360,11 +534,22 @@ function renderDashboardCompetitors(competitors) {
       }
     }
 
+    const compProj = state.projects.find(p => p.id === c.projectId);
+    const isOwn = c.siteType === 'own_site' || compProj?.type === 'own_site';
+    const typeBadge = isOwn
+      ? '<span class="pill pill-cyan">🏠 Own</span>'
+      : '';
+    const projLabel = compProj ? `<span class="pill pill-gray" style="font-size: 0.7rem;">📁 ${escapeHtml(compProj.name)}</span>` : '';
+
     html += `
       <tr>
         <td>
-          <strong>${escapeHtml(c.name)}</strong>
-          ${c.active === false ? '<span class="pill pill-gray" style="margin-left: 6px;">Paused</span>' : ''}
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            ${typeBadge}
+            ${projLabel}
+            <strong>${escapeHtml(c.name)}</strong>
+            ${c.active === false ? '<span class="pill pill-gray" style="margin-left: 6px;">Paused</span>' : ''}
+          </div>
         </td>
         <td>
           <a href="${escapeHtml(c.sitemapUrl)}" target="_blank" rel="noopener">
@@ -408,7 +593,7 @@ function renderCompetitorsList(competitors) {
     elements.competitorsTbody.innerHTML = `
       <tr>
         <td colspan="7" class="text-center empty-state">
-          No competitors configured yet. Add your first competitor XML sitemap above!
+          No sites configured in this project view yet. Add your first XML sitemap above!
         </td>
       </tr>
     `;
@@ -434,6 +619,9 @@ function renderCompetitorsList(competitors) {
     }
 
     const tagsHtml = (c.tags || []).map(t => `<span class="pill pill-gray">${escapeHtml(t)}</span>`).join(' ');
+    const compProj = state.projects.find(p => p.id === c.projectId);
+    const isOwn = c.siteType === 'own_site' || compProj?.type === 'own_site';
+    const projLabel = compProj ? `<span class="pill pill-gray" style="margin-top: 4px; display: inline-flex;">📁 ${escapeHtml(compProj.name)}</span>` : '';
 
     html += `
       <tr>
@@ -442,9 +630,15 @@ function renderCompetitorsList(competitors) {
             ${c.active !== false ? 'Active' : 'Paused'}
           </span>
         </td>
-        <td><strong>${escapeHtml(c.name)}</strong></td>
         <td>
-          <a href="${escapeHtml(c.sitemapUrl)}" target="_blank" rel="noopener">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <strong>${escapeHtml(c.name)}</strong>
+            ${isOwn ? '<span class="pill pill-cyan" style="font-size: 0.72rem; padding: 2px 7px;">🏠 Own Site</span>' : ''}
+          </div>
+          ${projLabel ? `<div>${projLabel}</div>` : ''}
+        </td>
+        <td>
+          <a href="${escapeHtml(c.sitemapUrl)}" target="_blank" rel="noopener" title="${escapeHtml(c.sitemapUrl)}">
             ${escapeHtml(c.sitemapUrl)}
           </a>
         </td>
@@ -492,21 +686,41 @@ function renderCompetitorsList(competitors) {
 
 async function setupDiffExplorer() {
   elements.diffSelectCompetitor.innerHTML = '';
-  if (state.competitors.length === 0) {
-    elements.diffSelectCompetitor.innerHTML = '<option value="">No competitors available</option>';
-    elements.diffUrlsContainer.innerHTML = '<div class="empty-state">No competitors available. Add a competitor first.</div>';
+
+  let comps = state.competitors;
+  if (state.currentProjectId && state.currentProjectId !== 'all') {
+    comps = comps.filter(c => c.projectId === state.currentProjectId);
+  }
+
+  if (comps.length === 0) {
+    const curProj = state.projects.find(p => p.id === state.currentProjectId);
+    const emptyMsg = curProj 
+      ? `No monitored sites in project "${escapeHtml(curProj.name)}"` 
+      : 'No competitors available';
+    elements.diffSelectCompetitor.innerHTML = `<option value="">${emptyMsg}</option>`;
+    elements.diffUrlsContainer.innerHTML = `<div class="empty-state">${emptyMsg}. Select another project or add a sitemap.</div>`;
+    elements.diffTotalUrls.textContent = '0';
+    elements.diffAddedCount.textContent = '+0';
+    elements.diffRemovedCount.textContent = '-0';
+    elements.countFilterAll.textContent = '0';
+    elements.countFilterAdded.textContent = '0';
+    elements.countFilterRemoved.textContent = '0';
+    elements.diffSelectSnapA.innerHTML = '<option value="">No snapshots</option>';
+    elements.diffSelectSnapB.innerHTML = '<option value="">No snapshots</option>';
     return;
   }
 
-  state.competitors.forEach(c => {
+  const prevCompId = elements.diffSelectCompetitor.value;
+  comps.forEach(c => {
     const opt = document.createElement('option');
     opt.value = c.id;
     opt.textContent = `${c.name} (${c.totalUrls || 0} URLs)`;
     elements.diffSelectCompetitor.appendChild(opt);
   });
 
-  const firstCompId = state.competitors[0].id;
-  await loadCompetitorSnapshots(firstCompId);
+  const selectedCompId = comps.some(c => c.id === prevCompId) ? prevCompId : comps[0].id;
+  elements.diffSelectCompetitor.value = selectedCompId;
+  await loadCompetitorSnapshots(selectedCompId);
 }
 
 async function loadCompetitorSnapshots(competitorId) {
@@ -728,13 +942,20 @@ function exportDiffCsv() {
 
 async function loadHistory() {
   try {
-    const res = await fetch('/api/history');
+    const q = state.currentProjectId && state.currentProjectId !== 'all' 
+      ? `?projectId=${encodeURIComponent(state.currentProjectId)}` 
+      : '';
+    const res = await fetch(`/api/history${q}`);
     const history = await res.json();
 
     if (history.length === 0) {
+      const curProj = state.projects.find(p => p.id === state.currentProjectId);
+      const emptyMsg = curProj 
+        ? `No crawl runs recorded for project "${escapeHtml(curProj.name)}" yet. Click "Run Check Now" to test!`
+        : 'No crawl runs recorded yet. Click "Run Check Now" to test!';
       elements.historyTbody.innerHTML = `
         <tr>
-          <td colspan="7" class="text-center empty-state">No crawl runs recorded yet. Click "Run Check Now" to test!</td>
+          <td colspan="8" class="text-center empty-state">${emptyMsg}</td>
         </tr>
       `;
       return;
@@ -749,9 +970,14 @@ async function loadHistory() {
         slackBadge = `<span class="pill pill-red" title="${escapeHtml(item.slackError)}">Failed ❌</span>`;
       }
 
+      const pName = item.projectName || (item.projectId && item.projectId !== 'all' ? item.projectId : 'All Projects');
+      const isAll = item.projectId === 'all' || !item.projectId;
+      const projectBadge = `<span class="pill ${isAll ? 'pill-gray' : 'pill-cyan'}">${escapeHtml(pName)}</span>`;
+
       html += `
         <tr>
           <td><strong>${formatDate(item.timestamp)}</strong></td>
+          <td>${projectBadge}</td>
           <td><span class="pill pill-cyan">${item.trigger || 'manual'}</span></td>
           <td>${item.competitorsCount} checked</td>
           <td><span class="pill pill-green">+${item.totalAdded || 0}</span></td>
@@ -776,8 +1002,65 @@ async function loadSettings() {
     const settings = await res.json();
     state.settings = settings;
 
-    elements.slackWebhookUrl.value = settings.slackWebhookUrl || '';
-    elements.slackChannel.value = settings.slackChannel || '#seo-page-alerts';
+    const curProj = state.currentProjectId && state.currentProjectId !== 'all' 
+      ? state.projects.find(p => p.id === state.currentProjectId) 
+      : null;
+
+    if (curProj && elements.slackScopeBanner) {
+      elements.slackScopeBanner.style.display = 'block';
+      elements.slackScopeBanner.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+          <div>
+            <h4 style="margin: 0; font-size: 0.9rem; color: #67e8f9;">📁 Custom Slack Webhook: <strong>${escapeHtml(curProj.name)}</strong></h4>
+            <p style="margin: 4px 0 0 0; font-size: 0.8rem; color: var(--text-muted);">
+              Alerts for sites in this project will be routed here. If left blank, Page Alerts falls back to the global webhook.
+            </p>
+          </div>
+          <span class="pill pill-cyan">Project Scope</span>
+        </div>
+      `;
+      elements.slackWebhookUrl.value = curProj.slackWebhookUrl || '';
+      elements.slackChannel.value = curProj.slackChannel || '';
+      if (elements.btnSaveSlack) elements.btnSaveSlack.textContent = `Save ${curProj.name} Slack Settings`;
+
+      if (elements.scheduleScopeBanner) {
+        elements.scheduleScopeBanner.style.display = 'block';
+        elements.scheduleScopeBanner.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+            <div>
+              <h4 style="margin: 0; font-size: 0.88rem; color: #e2e8f0;">⏰ Automated Crawler Schedule</h4>
+              <p style="margin: 4px 0 0 0; font-size: 0.8rem; color: var(--text-muted);">
+                The daily crawl schedule below applies system-wide across <strong>all active projects</strong> (including <strong>${escapeHtml(curProj.name)}</strong>).
+              </p>
+            </div>
+            <span class="pill pill-gray">Global System</span>
+          </div>
+        `;
+      }
+    } else {
+      if (elements.slackScopeBanner) {
+        elements.slackScopeBanner.style.display = 'block';
+        elements.slackScopeBanner.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+            <div>
+              <h4 style="margin: 0; font-size: 0.9rem; color: #f1f5f9;">🌐 Global Default Slack Webhook</h4>
+              <p style="margin: 4px 0 0 0; font-size: 0.8rem; color: var(--text-muted);">
+                Fallback Slack notification webhook used for any project that does not specify its own custom webhook.
+              </p>
+            </div>
+            <span class="pill pill-gray">Global Fallback</span>
+          </div>
+        `;
+      }
+      elements.slackWebhookUrl.value = settings.slackWebhookUrl || '';
+      elements.slackChannel.value = settings.slackChannel || '#seo-page-alerts';
+      if (elements.btnSaveSlack) elements.btnSaveSlack.textContent = 'Save Global Settings';
+
+      if (elements.scheduleScopeBanner) {
+        elements.scheduleScopeBanner.style.display = 'none';
+      }
+    }
+
     elements.slackNotifyOnlyChanges.checked = settings.notifyOnlyIfChanges !== false;
     elements.slackNotifyRemoved.checked = settings.notifyOnRemoved !== false;
     elements.slackMaxUrls.value = settings.maxUrlsInSlack || 8;
@@ -793,6 +1076,45 @@ async function loadSettings() {
 
 async function saveSlackSettings(e) {
   e.preventDefault();
+  const curProj = state.currentProjectId && state.currentProjectId !== 'all' 
+    ? state.projects.find(p => p.id === state.currentProjectId) 
+    : null;
+
+  if (curProj) {
+    try {
+      const projRes = await fetch(`/api/projects/${curProj.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slackWebhookUrl: elements.slackWebhookUrl.value.trim(),
+          slackChannel: elements.slackChannel.value.trim()
+        })
+      });
+      if (!projRes.ok) throw new Error('Failed to save project Slack settings');
+      const updatedProj = await projRes.json();
+      const idx = state.projects.findIndex(p => p.id === updatedProj.id);
+      if (idx !== -1) state.projects[idx] = updatedProj;
+
+      // Also persist general alert notification preferences
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notifyOnlyIfChanges: elements.slackNotifyOnlyChanges.checked,
+          notifyOnRemoved: elements.slackNotifyRemoved.checked,
+          maxUrlsInSlack: parseInt(elements.slackMaxUrls.value, 10) || 8
+        })
+      });
+
+      showToast(`Slack settings saved for project "${curProj.name}"!`, 'success');
+      loadStats();
+      return;
+    } catch (err) {
+      showToast(err.message, 'error');
+      return;
+    }
+  }
+
   const updates = {
     slackWebhookUrl: elements.slackWebhookUrl.value.trim(),
     slackChannel: elements.slackChannel.value.trim(),
@@ -839,8 +1161,15 @@ async function saveCrawlerSettings(e) {
 }
 
 async function testSlackWebhook() {
-  const webhookUrl = elements.slackWebhookUrl.value.trim();
-  const channel = elements.slackChannel.value.trim();
+  let webhookUrl = elements.slackWebhookUrl.value.trim();
+  let channel = elements.slackChannel.value.trim();
+
+  // If testing in project view and the webhook input is blank, fallback to global webhook
+  if (!webhookUrl && state.settings?.slackWebhookUrl) {
+    webhookUrl = state.settings.slackWebhookUrl;
+    channel = channel || state.settings.slackChannel || '#seo-page-alerts';
+    showToast('Using global fallback webhook for this test...', 'info');
+  }
 
   if (!webhookUrl) {
     showToast('Please enter a Slack Webhook URL first.', 'error');
@@ -875,22 +1204,29 @@ async function testSlackWebhook() {
 async function runAllCheck() {
   if (elements.btnRunAllCheck.disabled) return;
 
+  const curProj = state.currentProjectId !== 'all' ? state.projects.find(p => p.id === state.currentProjectId) : null;
+  const targetLabel = curProj ? `project "${curProj.name}"` : 'all monitored sitemaps';
+
   elements.btnRunAllCheck.disabled = true;
   elements.btnRunAllText.textContent = 'Crawling & Diffing...';
-  showToast('Starting crawl across all competitor sitemaps (no Slack alert)...', 'info');
+  showToast(`Starting crawl for ${targetLabel} (no Slack alert)...`, 'info');
 
   try {
+    const payload = { sendSlack: false };
+    if (state.currentProjectId && state.currentProjectId !== 'all') {
+      payload.projectId = state.currentProjectId;
+    }
     const res = await fetch('/api/check/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sendSlack: false })
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Crawl failed');
 
     const added = data.totalAdded || 0;
     const removed = data.totalRemoved || 0;
-    showToast(`Check finished: +${added} added, -${removed} removed!`, 'success');
+    showToast(`Check finished for ${targetLabel}: +${added} added, -${removed} removed!`, 'success');
 
     await Promise.all([
       loadStats(),
@@ -926,6 +1262,15 @@ async function runSingleCheck(competitorId) {
 // ================= Modals Logic =================
 
 function setupModals() {
+  // Project Modal
+  elements.btnCloseProjectModal?.addEventListener('click', () => {
+    elements.modalProject.style.display = 'none';
+  });
+  elements.btnCancelProjectModal?.addEventListener('click', () => {
+    elements.modalProject.style.display = 'none';
+  });
+  elements.projectForm?.addEventListener('submit', handleSaveProject);
+
   // Competitor Modal
   elements.btnCloseCompModal.addEventListener('click', () => {
     elements.modalCompetitor.style.display = 'none';
@@ -935,6 +1280,14 @@ function setupModals() {
   });
   elements.competitorForm.addEventListener('submit', handleSaveCompetitor);
   elements.btnModalTestSitemap.addEventListener('click', handleModalTestSitemap);
+
+  // Auto-sync site classification when assigning project
+  elements.compProjectId?.addEventListener('change', () => {
+    const selProj = state.projects.find(p => p.id === elements.compProjectId.value);
+    if (selProj && elements.compSiteType) {
+      elements.compSiteType.value = selProj.type === 'own_site' ? 'own_site' : 'competitor';
+    }
+  });
 
   // Inspect Modal
   elements.btnCloseInspectModal.addEventListener('click', () => {
@@ -947,21 +1300,128 @@ function setupModals() {
   elements.btnRunInspect.addEventListener('click', runInspectFromModal);
 }
 
+function openProjectModal(proj = null) {
+  if (proj) {
+    elements.modalProjectTitle.textContent = 'Edit Project';
+    elements.projectIdInput.value = proj.id;
+    elements.projectNameInput.value = proj.name;
+    elements.projectTypeInput.value = proj.type || 'competitor';
+    elements.projectDescriptionInput.value = proj.description || '';
+    elements.projectSlackWebhookInput.value = proj.slackWebhookUrl || '';
+    elements.projectSlackChannelInput.value = proj.slackChannel || '';
+  } else {
+    elements.modalProjectTitle.textContent = 'Create New Project';
+    elements.projectIdInput.value = '';
+    elements.projectForm.reset();
+  }
+  elements.modalProject.style.display = 'flex';
+}
+
+async function handleSaveProject(e) {
+  e.preventDefault();
+  const id = elements.projectIdInput.value;
+  const payload = {
+    name: elements.projectNameInput.value.trim(),
+    type: elements.projectTypeInput.value,
+    description: elements.projectDescriptionInput.value.trim(),
+    slackWebhookUrl: elements.projectSlackWebhookInput.value.trim(),
+    slackChannel: elements.projectSlackChannelInput.value.trim()
+  };
+
+  if (!payload.name) {
+    showToast('Project name is required', 'error');
+    return;
+  }
+
+  try {
+    const method = id ? 'PUT' : 'POST';
+    const endpoint = id ? `/api/projects/${id}` : '/api/projects';
+
+    const res = await fetch(endpoint, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to save project');
+
+    elements.modalProject.style.display = 'none';
+    showToast(`Project "${payload.name}" saved!`, 'success');
+
+    await loadProjects();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteProject(id) {
+  const proj = state.projects.find(p => p.id === id);
+  if (!proj) return;
+
+  if (state.projects.length <= 1) {
+    showToast('Cannot delete the last remaining project.', 'error');
+    return;
+  }
+
+  if (!confirm(`Are you sure you want to delete project "${proj.name}"? Monitored sites will be reassigned to the default project.`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to delete project');
+
+    showToast(`Project "${proj.name}" deleted.`, 'info');
+    if (state.currentProjectId === id) {
+      state.currentProjectId = 'all';
+      elements.headerProjectSelect.value = 'all';
+    }
+    await Promise.all([loadProjects(), loadCompetitors(), loadStats()]);
+    if (state.activeTab === 'tab-diff') setupDiffExplorer();
+    if (state.activeTab === 'tab-history') loadHistory();
+    if (state.activeTab === 'tab-settings') loadSettings();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
 function openCompetitorModal(comp = null) {
   elements.modalSitemapTestResult.style.display = 'none';
   elements.modalSitemapTestResult.innerHTML = '';
 
+  // Populate project options
+  if (elements.compProjectId && state.projects.length > 0) {
+    elements.compProjectId.innerHTML = '';
+    state.projects.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      const icon = p.type === 'own_site' ? '🏠' : '🎯';
+      opt.textContent = `${icon} ${p.name}`;
+      elements.compProjectId.appendChild(opt);
+    });
+  }
+
   if (comp) {
-    elements.modalCompTitle.textContent = 'Edit Competitor';
+    elements.modalCompTitle.textContent = 'Edit Monitored Site';
     elements.compId.value = comp.id;
+    if (elements.compProjectId) elements.compProjectId.value = comp.projectId || 'proj_default';
+    if (elements.compSiteType) elements.compSiteType.value = comp.siteType || 'competitor';
     elements.compName.value = comp.name;
     elements.compSitemapUrl.value = comp.sitemapUrl;
     elements.compTags.value = (comp.tags || []).join(', ');
     elements.compActive.checked = comp.active !== false;
   } else {
-    elements.modalCompTitle.textContent = 'Add Competitor Sitemap';
+    elements.modalCompTitle.textContent = 'Add Monitored Site';
     elements.compId.value = '';
     elements.competitorForm.reset();
+    if (elements.compProjectId) {
+      elements.compProjectId.value = state.currentProjectId !== 'all' ? state.currentProjectId : (state.projects[0]?.id || 'proj_default');
+    }
+    if (elements.compSiteType) {
+      const selectedProj = state.projects.find(p => p.id === elements.compProjectId?.value);
+      elements.compSiteType.value = selectedProj?.type === 'own_site' ? 'own_site' : 'competitor';
+    }
     elements.compActive.checked = true;
   }
 
@@ -1015,6 +1475,8 @@ async function handleSaveCompetitor(e) {
   e.preventDefault();
   const id = elements.compId.value;
   const payload = {
+    projectId: elements.compProjectId ? elements.compProjectId.value : 'proj_default',
+    siteType: elements.compSiteType ? elements.compSiteType.value : 'competitor',
     name: elements.compName.value.trim(),
     sitemapUrl: elements.compSitemapUrl.value.trim(),
     tags: elements.compTags.value.trim(),
@@ -1034,7 +1496,7 @@ async function handleSaveCompetitor(e) {
     if (!res.ok) throw new Error(data.error || 'Failed to save');
 
     elements.modalCompetitor.style.display = 'none';
-    showToast(`Competitor "${payload.name}" saved!`, 'success');
+    showToast(`Site "${payload.name}" saved!`, 'success');
 
     await Promise.all([loadStats(), loadCompetitors()]);
   } catch (err) {

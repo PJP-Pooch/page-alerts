@@ -12,19 +12,23 @@ async function main() {
   switch (command) {
     case 'check': {
       const dryRun = args.includes('--dry-run') || args.includes('-d');
-      console.log(`\n🔍 Running Competitor Sitemap Check (Slack notification: ${dryRun ? 'DISABLED (Dry Run)' : 'ENABLED'})...`);
+      const projIdx = args.indexOf('--project');
+      const targetProj = projIdx !== -1 ? args[projIdx + 1] : null;
+
+      console.log(`\n🔍 Running Sitemap Check (Slack notification: ${dryRun ? 'DISABLED (Dry Run)' : 'ENABLED'}${targetProj ? `, Project: ${targetProj}` : ''})...`);
 
       const result = await runner.runCheck({
         trigger: 'cli',
+        projectId: targetProj,
         sendSlack: !dryRun
       });
 
       console.log('\n================ CHECK SUMMARY ================');
-      console.log(`Competitors Checked: ${result.competitorsChecked}`);
-      console.log(`Total New Pages Added:   +${result.totalAdded}`);
-      console.log(`Total Pages Removed:     -${result.totalRemoved}`);
-      console.log(`Duration:                ${(result.durationMs / 1000).toFixed(2)}s`);
-      console.log(`Slack Notification:      ${result.slackSent ? 'Sent ✅' : (result.slackError ? `Failed ❌ (${result.slackError})` : 'Skipped / Not configured')}`);
+      console.log(`Sites Checked:         ${result.competitorsChecked}`);
+      console.log(`Total New Pages Added: +${result.totalAdded}`);
+      console.log(`Total Pages Removed:   -${result.totalRemoved}`);
+      console.log(`Duration:              ${(result.durationMs / 1000).toFixed(2)}s`);
+      console.log(`Slack Notification:    ${result.slackSent ? 'Sent ✅' : (result.slackError ? `Failed ❌ (${result.slackError})` : 'Skipped / Not configured')}`);
       console.log('================================================\n');
 
       if (result.results && result.results.length > 0) {
@@ -45,14 +49,35 @@ async function main() {
       break;
     }
 
+    case 'projects': {
+      const projects = await storage.getProjects();
+      const competitors = await storage.getCompetitors();
+      console.log(`\n📁 Projects & Workspaces (${projects.length}):\n`);
+      projects.forEach((p, idx) => {
+        const count = competitors.filter(c => c.projectId === p.id).length;
+        const typeBadge = p.type === 'own_site' ? '[🏠 Own Site]' : '[🎯 Competitor]';
+        console.log(`${idx + 1}. ${typeBadge} ${p.name} (ID: ${p.id})`);
+        console.log(`   Description:     ${p.description || 'None'}`);
+        console.log(`   Monitored Sites: ${count}`);
+        console.log(`   Slack Routing:   ${p.slackWebhookUrl ? 'Dedicated Webhook' : 'Global Default'}`);
+        console.log('');
+      });
+      break;
+    }
+
     case 'list': {
       const competitors = await storage.getCompetitors();
-      console.log(`\n📋 Monitored Competitors (${competitors.length}):\n`);
+      const projects = await storage.getProjects();
+      const projMap = new Map(projects.map(p => [p.id, p]));
+
+      console.log(`\n📋 Monitored Sites (${competitors.length}):\n`);
       if (competitors.length === 0) {
-        console.log('No competitors configured yet. Add them in the Web UI or via CLI.');
+        console.log('No sites configured yet. Add them in the Web UI or via CLI.');
       } else {
         competitors.forEach((c, idx) => {
-          console.log(`${idx + 1}. [${c.active ? 'ACTIVE' : 'PAUSED'}] ${c.name}`);
+          const p = projMap.get(c.projectId);
+          const typeIcon = (c.siteType === 'own_site' || p?.type === 'own_site') ? '🏠 Own Site' : '🎯 Competitor';
+          console.log(`${idx + 1}. [${c.active ? 'ACTIVE' : 'PAUSED'}] [${typeIcon}] ${c.name} ${p ? `(${p.name})` : ''}`);
           console.log(`   Sitemap:    ${c.sitemapUrl}`);
           console.log(`   Total URLs: ${c.totalUrls || 0}`);
           console.log(`   Last Check: ${c.lastCheck ? new Date(c.lastCheck).toLocaleString() : 'Never'}`);
@@ -114,12 +139,14 @@ async function main() {
 Competitor Sitemap Page Alerts - CLI
 -------------------------------------
 Usage:
-  node cli.js check              Run full crawl & diff analysis on all active competitors and send Slack alert
-  node cli.js check --dry-run    Run check and diff analysis WITHOUT sending Slack alerts
-  node cli.js list               List all monitored competitors and status
-  node cli.js test-sitemap <url> Test & validate an XML sitemap or sitemap index URL
-  node cli.js test-slack         Send a test message to your configured Slack webhook
-  node server.js                 Start the Web Dashboard and scheduler (default: http://localhost:3456)
+  node cli.js check                     Run full crawl & diff analysis on all active sites and send Slack alert
+  node cli.js check --dry-run           Run check and diff analysis WITHOUT sending Slack alerts
+  node cli.js check --project <id>      Run check only for a specific project
+  node cli.js projects                  List all configured Projects & Workspaces
+  node cli.js list                      List all monitored sites, project assignment, and status
+  node cli.js test-sitemap <url>        Test & validate an XML sitemap or sitemap index URL
+  node cli.js test-slack                Send a test message to your configured Slack webhook
+  node server.js                        Start the Web Dashboard and scheduler (default: http://localhost:3456)
 `);
       break;
     }
