@@ -13,6 +13,10 @@ const PORT = process.env.PORT || 3456;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // State tracker for active check
 let isCheckRunning = false;
 let lastCheckResult = null;
