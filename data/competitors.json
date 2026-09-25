@@ -10,13 +10,13 @@
       "Shopify"
     ],
     "totalUrls": 521,
-    "lastCheck": "2026-09-25T16:12:18.517Z",
+    "lastCheck": "2026-09-25T16:25:10.123Z",
     "lastDiff": {
       "added": [],
       "removed": [],
       "byCategory": {},
-      "modifiedCount": 0,
-      "timestamp": "2026-09-25T16:12:18.517Z",
+      "modifiedCount": 319,
+      "timestamp": "2026-09-25T16:25:10.123Z",
       "isFirstRun": false
     },
     "createdAt": "2026-09-25T15:52:34.314Z"
@@ -28,13 +28,13 @@
     "active": true,
     "tags": [],
     "totalUrls": 649,
-    "lastCheck": "2026-09-25T16:12:19.328Z",
+    "lastCheck": "2026-09-25T16:25:10.924Z",
     "lastDiff": {
       "added": [],
       "removed": [],
       "byCategory": {},
       "modifiedCount": 49,
-      "timestamp": "2026-09-25T16:12:19.328Z",
+      "timestamp": "2026-09-25T16:25:10.924Z",
       "isFirstRun": false
     },
     "createdAt": "2026-09-25T15:57:55.340Z"
@@ -46,13 +46,13 @@
     "active": true,
     "tags": [],
     "totalUrls": 3310,
-    "lastCheck": "2026-09-25T16:12:19.715Z",
+    "lastCheck": "2026-09-25T16:25:11.366Z",
     "lastDiff": {
       "added": [],
       "removed": [],
       "byCategory": {},
       "modifiedCount": 0,
-      "timestamp": "2026-09-25T16:12:19.715Z",
+      "timestamp": "2026-09-25T16:25:11.366Z",
       "isFirstRun": false
     },
     "createdAt": "2026-09-25T16:05:11.140Z"
@@ -63,9 +63,15 @@
     "sitemapUrl": "https://www.purepetfood.com/sitemap.xml",
     "active": true,
     "tags": [],
-    "totalUrls": 0,
-    "lastCheck": null,
-    "lastDiff": null,
+    "totalUrls": 596,
+    "lastCheck": "2026-09-25T16:25:12.456Z",
+    "lastDiff": {
+      "added": [],
+      "removed": [],
+      "modifiedCount": 0,
+      "timestamp": "2026-09-25T16:25:12.456Z",
+      "isFirstRun": true
+    },
     "createdAt": "2026-09-25T16:25:01.297Z"
   }
 ]
