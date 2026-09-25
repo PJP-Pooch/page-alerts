@@ -1,27 +1,197 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
+const cookieParser = require('cookie-parser');
 const storage = require('./lib/storage');
 const runner = require('./lib/runner');
 const scheduler = require('./lib/scheduler');
 const sitemapParser = require('./lib/sitemapParser');
 const slackNotifier = require('./lib/slackNotifier');
 const diffEngine = require('./lib/diffEngine');
+const auth = require('./lib/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3456;
 
 app.use(express.json());
+app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname));
 
+// Serve index.html on root
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  const p = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(p)) return res.sendFile(p);
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // State tracker for active check
 let isCheckRunning = false;
 let lastCheckResult = null;
 
-// ================= API ROUTES =================
+// ================= AUTHENTICATION ROUTES =================
+
+// 1. Auth Status (Check if user is logged in & if Google Auth is enabled)
+app.get('/api/auth/status', (req, res) => {
+  const authConfigured = auth.isAuthConfigured();
+  if (!authConfigured) {
+    return res.json({
+      authConfigured: false,
+      authenticated: true,
+      user: { name: 'Local Admin', email: 'admin@local' }
+    });
+  }
+
+  const token = req.cookies ? req.cookies[auth.COOKIE_NAME] : null;
+  const user = auth.verifySignedToken(token);
+
+  if (user && auth.isEmailAllowed(user.email)) {
+    return res.json({
+      authConfigured: true,
+      authenticated: true,
+      user: {
+        name: user.name,
+        email: user.email,
+        picture: user.picture
+      },
+      allowedDomain: auth.ALLOWED_DOMAIN
+    });
+  }
+
+  return res.json({
+    authConfigured: true,
+    authenticated: false,
+    allowedDomain: auth.ALLOWED_DOMAIN
+  });
+});
+
+// 2. Initiate Google OAuth Login
+app.get('/api/auth/login', (req, res) => {
+  if (!auth.isAuthConfigured()) {
+    return res.redirect('/');
+  }
+
+  const redirectUri = auth.getRedirectUri(req);
+  const params = new URLSearchParams({
+    client_id: auth.CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'openid email profile',
+    access_type: 'online',
+    prompt: 'select_account'
+  });
+
+  if (auth.ALLOWED_DOMAIN) {
+    const firstDomain = auth.ALLOWED_DOMAIN.split(',')[0].trim().replace(/^@/, '');
+    params.append('hd', firstDomain);
+  }
+
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+});
+
+// 3. Google OAuth Callback
+app.get('/api/auth/callback', async (req, res) => {
+  const code = req.query.code;
+  if (!code) {
+    return res.status(400).send('Authentication failed: Missing authorization code.');
+  }
+
+  try {
+    const redirectUri = auth.getRedirectUri(req);
+
+    // Exchange code for Google Access Token
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: auth.CLIENT_ID,
+        client_secret: auth.CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      })
+    });
+
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.access_token) {
+      throw new Error(tokenData.error_description || 'Failed to exchange authorization token with Google.');
+    }
+
+    // Fetch user profile from Google
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` }
+    });
+
+    const profile = await profileRes.json();
+    if (!profileRes.ok || !profile.email) {
+      throw new Error('Failed to retrieve user profile from Google.');
+    }
+
+    // Verify company domain
+    if (!auth.isEmailAllowed(profile.email)) {
+      return res.status(403).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Access Denied - PageAlerts</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0b0f19; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .box { background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 36px; max-width: 480px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+            h2 { color: #f43f5e; margin-bottom: 12px; }
+            p { color: #9ca3af; font-size: 0.95rem; line-height: 1.6; }
+            .email { color: #67e8f9; font-weight: 600; }
+            .btn { display: inline-block; margin-top: 24px; padding: 10px 20px; background: #8b5cf6; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 600; }
+          </style>
+        </head>
+        <body>
+          <div class="box">
+            <h2>⛔ Access Restricted</h2>
+            <p>You signed in as <span class="email">${profile.email}</span>.</p>
+            <p>PageAlerts is restricted to accounts with domain: <strong>@${auth.ALLOWED_DOMAIN}</strong>.</p>
+            <a href="/api/auth/login" class="btn">Try Another Google Account</a>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Issue signed session cookie (14 days validity)
+    const sessionToken = auth.createSignedToken({
+      email: profile.email,
+      name: profile.name || profile.email.split('@')[0],
+      picture: profile.picture || null,
+      exp: Date.now() + 14 * 24 * 60 * 60 * 1000
+    });
+
+    const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+    res.cookie(auth.COOKIE_NAME, sessionToken, {
+      httpOnly: true,
+      secure: isSecure,
+      sameSite: 'lax',
+      maxAge: 14 * 24 * 60 * 60 * 1000
+    });
+
+    res.redirect('/');
+  } catch (err) {
+    console.error('[Google OAuth Error]', err);
+    res.status(500).send(`Authentication error: ${err.message}`);
+  }
+});
+
+// 4. Logout
+app.all('/api/auth/logout', (req, res) => {
+  res.clearCookie(auth.COOKIE_NAME);
+  res.redirect('/');
+});
+
+// ================= PROTECTED API ROUTES =================
+// Protect all remaining /api routes (except /api/cron/check which handles Vercel crons)
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/auth') || req.path.startsWith('/cron')) {
+    return next();
+  }
+  auth.requireAuth(req, res, next);
+});
 
 // 1. Dashboard Overview Stats
 app.get('/api/stats', async (req, res) => {
@@ -164,7 +334,7 @@ app.get('/api/competitors/:id/diff', async (req, res) => {
   }
 });
 
-// 4. Manual or Vercel Cron Crawl Execution
+// 4. Crawl Execution (Manual or Automated Vercel Cron)
 app.all(['/api/check/run', '/api/cron/check'], async (req, res) => {
   if (isCheckRunning) {
     return res.status(409).json({ error: 'A sitemap check is already in progress. Please wait.' });

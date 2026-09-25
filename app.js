@@ -145,6 +145,51 @@ function escapeHtml(str) {
             .replace(/"/g, '&quot;');
 }
 
+async function checkAuthStatus() {
+  try {
+    const res = await fetch('/api/auth/status');
+    const data = await res.json();
+
+    const authOverlay = document.getElementById('auth-overlay');
+    const sidebarUserBox = document.getElementById('sidebar-user-box');
+    const authDomainMsg = document.getElementById('auth-domain-msg');
+
+    if (data.allowedDomain && authDomainMsg) {
+      authDomainMsg.textContent = `Sign in with your @${data.allowedDomain} Google Workspace account to access competitor change alerts.`;
+    }
+
+    if (data.authConfigured && !data.authenticated) {
+      // Show Google login overlay
+      if (authOverlay) authOverlay.style.display = 'flex';
+      if (sidebarUserBox) sidebarUserBox.style.display = 'none';
+      return false;
+    } else {
+      if (authOverlay) authOverlay.style.display = 'none';
+      if (data.authenticated && data.user && sidebarUserBox) {
+        sidebarUserBox.style.display = 'flex';
+        document.getElementById('user-name').textContent = data.user.name || 'User';
+        document.getElementById('user-email').textContent = data.user.email || '';
+
+        const avatarImg = document.getElementById('user-avatar');
+        const avatarInitials = document.getElementById('user-avatar-initials');
+        if (data.user.picture) {
+          avatarImg.src = data.user.picture;
+          avatarImg.style.display = 'block';
+          avatarInitials.style.display = 'none';
+        } else {
+          avatarImg.style.display = 'none';
+          avatarInitials.style.display = 'flex';
+          avatarInitials.textContent = (data.user.name || 'U').charAt(0).toUpperCase();
+        }
+      }
+      return true;
+    }
+  } catch (err) {
+    console.warn('Auth check error:', err);
+    return true;
+  }
+}
+
 // ================= Initialization =================
 
 async function init() {
@@ -152,6 +197,9 @@ async function init() {
   setupNavigation();
   setupModals();
   setupEventListeners();
+
+  const isAuthed = await checkAuthStatus();
+  if (!isAuthed) return;
 
   await Promise.all([
     loadStats(),
