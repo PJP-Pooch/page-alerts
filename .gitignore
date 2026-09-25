@@ -1,0 +1,15 @@
+node_modules
+.DS_Store
+Thumbs.db
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.env.local
+.env.*.local
+.vercel
+
+# Keep competitors.json for initial seeding, ignore local run caches & secrets
+data/snapshots/
+data/settings.json
+data/history.json

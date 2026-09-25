@@ -1,0 +1,60 @@
+[
+  {
+    "id": "comp_1790351554314_2srqr",
+    "name": "Lily's Kitchen",
+    "sitemapUrl": "https://www.lilyskitchen.co.uk/sitemap.xml",
+    "active": true,
+    "tags": [
+      "Pet Food",
+      "E-commerce",
+      "Shopify"
+    ],
+    "totalUrls": 521,
+    "lastCheck": "2026-09-25T16:12:18.517Z",
+    "lastDiff": {
+      "added": [],
+      "removed": [],
+      "byCategory": {},
+      "modifiedCount": 0,
+      "timestamp": "2026-09-25T16:12:18.517Z",
+      "isFirstRun": false
+    },
+    "createdAt": "2026-09-25T15:52:34.314Z"
+  },
+  {
+    "id": "comp_1790351875340_kcgnu",
+    "name": "Scrumbles",
+    "sitemapUrl": "https://www.scrumbles.co.uk/sitemap.xml",
+    "active": true,
+    "tags": [],
+    "totalUrls": 649,
+    "lastCheck": "2026-09-25T16:12:19.328Z",
+    "lastDiff": {
+      "added": [],
+      "removed": [],
+      "byCategory": {},
+      "modifiedCount": 49,
+      "timestamp": "2026-09-25T16:12:19.328Z",
+      "isFirstRun": false
+    },
+    "createdAt": "2026-09-25T15:57:55.340Z"
+  },
+  {
+    "id": "comp_1790352311140_9pgmo",
+    "name": "Butternut Box",
+    "sitemapUrl": "https://butternutbox.com/sitemap.xml",
+    "active": true,
+    "tags": [],
+    "totalUrls": 3310,
+    "lastCheck": "2026-09-25T16:12:19.715Z",
+    "lastDiff": {
+      "added": [],
+      "removed": [],
+      "byCategory": {},
+      "modifiedCount": 0,
+      "timestamp": "2026-09-25T16:12:19.715Z",
+      "isFirstRun": false
+    },
+    "createdAt": "2026-09-25T16:05:11.140Z"
+  }
+]
