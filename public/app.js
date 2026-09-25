@@ -877,13 +877,13 @@ async function runAllCheck() {
 
   elements.btnRunAllCheck.disabled = true;
   elements.btnRunAllText.textContent = 'Crawling & Diffing...';
-  showToast('Starting crawl across all competitor sitemaps...', 'info');
+  showToast('Starting crawl across all competitor sitemaps (no Slack alert)...', 'info');
 
   try {
     const res = await fetch('/api/check/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sendSlack: true })
+      body: JSON.stringify({ sendSlack: false })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Crawl failed');
@@ -906,12 +906,12 @@ async function runAllCheck() {
 }
 
 async function runSingleCheck(competitorId) {
-  showToast('Crawling competitor sitemap...', 'info');
+  showToast('Crawling competitor sitemap (no Slack alert)...', 'info');
   try {
     const res = await fetch('/api/check/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ competitorId, sendSlack: true })
+      body: JSON.stringify({ competitorId, sendSlack: false })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Check failed');

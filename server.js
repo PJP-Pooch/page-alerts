@@ -340,15 +340,21 @@ app.all(['/api/check/run', '/api/cron/check'], async (req, res) => {
     return res.status(409).json({ error: 'A sitemap check is already in progress. Please wait.' });
   }
 
-  const { competitorId, sendSlack } = req.body || {};
-  const isCron = req.path.includes('cron');
+  const { competitorId } = req.body || {};
+  const isCron = req.path.includes('cron') || Boolean(req.headers['x-vercel-cron']);
+  
+  // Only send Slack if triggered by schedule/cron, or if explicitly requested
+  const shouldSendSlack = (req.body && req.body.sendSlack !== undefined)
+    ? Boolean(req.body.sendSlack)
+    : isCron;
+
   isCheckRunning = true;
 
   try {
     const result = await runner.runCheck({
       competitorId,
       trigger: isCron ? 'scheduled' : 'manual',
-      sendSlack: sendSlack !== false
+      sendSlack: shouldSendSlack
     });
     lastCheckResult = result;
     isCheckRunning = false;
