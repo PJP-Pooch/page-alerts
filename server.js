@@ -385,6 +385,294 @@ app.get('/api/competitors/:id/diff', async (req, res) => {
   }
 });
 
+// Helper for human-readable diff dates
+function formatHumanDiffDate(dateStr, includeWeekday = true) {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length < 3) return dateStr;
+  const [y, m, d] = parts.map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  const today = new Date().toISOString().split('T')[0];
+  const yest = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  const dayMonth = dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const weekday = dt.toLocaleDateString('en-GB', { weekday: 'short' });
+  const fullYear = dt.getFullYear();
+
+  if (dateStr === today) return `Today (${dayMonth} ${fullYear})`;
+  if (dateStr === yest) return `Yesterday (${dayMonth} ${fullYear})`;
+  return includeWeekday ? `${weekday}, ${dayMonth} ${fullYear}` : `${dayMonth} ${fullYear}`;
+}
+
+// 3.1 Daily Diff Explorer endpoint (automatic day-by-day change detection)
+app.get('/api/diff/daily', async (req, res) => {
+  const { competitorId, projectId, date, run } = req.query;
+
+  try {
+    let competitors = await storage.getCompetitors();
+    if (projectId && projectId !== 'all') {
+      competitors = competitors.filter(c => c.projectId === projectId);
+    }
+
+    const isSingle = competitorId && competitorId !== 'all';
+    const targetComp = isSingle ? competitors.find(c => c.id === competitorId) : null;
+
+    if (isSingle && !targetComp) {
+      return res.status(404).json({ error: 'Competitor not found in this project.' });
+    }
+
+    const compsToInspect = isSingle ? [targetComp] : competitors;
+
+    async function getCompSnapData(comp) {
+      const list = await storage.getSnapshotList(comp.id);
+      const byDate = new Map();
+      for (const s of list) {
+        const dStr = s.createdAt ? s.createdAt.split('T')[0] : s.filename.substring(0, 10);
+        if (!byDate.has(dStr)) byDate.set(dStr, []);
+        byDate.get(dStr).push(s);
+      }
+      const dates = Array.from(byDate.keys()).sort().reverse();
+      return { comp, list, byDate, dates };
+    }
+
+    const compsData = await Promise.all(compsToInspect.map(getCompSnapData));
+
+    const allDatesSet = new Set();
+    compsData.forEach(cd => cd.dates.forEach(d => allDatesSet.add(d)));
+    const allDates = Array.from(allDatesSet).sort().reverse();
+
+    if (allDates.length === 0) {
+      return res.json({
+        hasData: false,
+        competitor: targetComp || null,
+        availableDates: [],
+        message: 'No snapshots recorded yet for this site.'
+      });
+    }
+
+    const availableDatesMeta = allDates.map(d => ({
+      date: d,
+      label: formatHumanDiffDate(d),
+      isToday: d === new Date().toISOString().split('T')[0],
+      isYesterday: d === new Date(Date.now() - 86400000).toISOString().split('T')[0]
+    }));
+
+    // Mode A: Multi-day continuous feed ("date=all")
+    if (date === 'all') {
+      const feedDays = [];
+      const datesToProcess = allDates.slice(0, 14);
+
+      for (const d of datesToProcess) {
+        let dayAdded = [];
+        let dayRemoved = [];
+        let dayModified = [];
+        let totalUrls = 0;
+        let isFirstRun = false;
+        let activeSitesCount = 0;
+
+        for (const cd of compsData) {
+          if (!cd.byDate.has(d)) continue;
+          activeSitesCount++;
+          const daySnaps = cd.byDate.get(d);
+          const currFile = daySnaps[0].filename;
+          const dIdx = cd.dates.indexOf(d);
+          const prevFile = dIdx + 1 < cd.dates.length ? cd.byDate.get(cd.dates[dIdx + 1])[0].filename : null;
+
+          const curr = await storage.getSnapshotContent(cd.comp.id, currFile);
+          const prev = prevFile ? await storage.getSnapshotContent(cd.comp.id, prevFile) : null;
+          const diff = diffEngine.calculateDiff(prev, curr);
+
+          totalUrls += (curr?.totalUrls || 0);
+          if (diff.isFirstRun) isFirstRun = true;
+
+          diff.added.forEach(item => {
+            dayAdded.push({ ...item, competitorId: cd.comp.id, competitorName: cd.comp.name });
+          });
+          diff.removed.forEach(item => {
+            dayRemoved.push({ ...item, competitorId: cd.comp.id, competitorName: cd.comp.name });
+          });
+          diff.modified.forEach(item => {
+            dayModified.push({ ...item, competitorId: cd.comp.id, competitorName: cd.comp.name });
+          });
+        }
+
+        feedDays.push({
+          date: d,
+          dateLabel: formatHumanDiffDate(d),
+          diff: {
+            added: dayAdded,
+            removed: dayRemoved,
+            modified: dayModified,
+            isFirstRun: isFirstRun && dayAdded.length === 0 && dayRemoved.length === 0
+          },
+          totalUrls,
+          activeSitesCount
+        });
+      }
+
+      return res.json({
+        hasData: true,
+        mode: 'feed',
+        competitorId: competitorId || 'all',
+        competitor: targetComp || null,
+        availableDates: availableDatesMeta,
+        days: feedDays
+      });
+    }
+
+    // Mode B: Single Day Diff
+    const selectedDate = (date && allDates.includes(date)) ? date : allDates[0];
+
+    // Single competitor
+    if (isSingle) {
+      const cd = compsData[0];
+      const daySnaps = cd.byDate.get(selectedDate) || [];
+
+      if (daySnaps.length === 0) {
+        return res.json({
+          hasData: false,
+          competitor: targetComp,
+          date: selectedDate,
+          dateLabel: formatHumanDiffDate(selectedDate),
+          availableDates: availableDatesMeta,
+          runs: [],
+          diff: { added: [], removed: [], modified: [], isFirstRun: false }
+        });
+      }
+
+      let currFile = null;
+      let prevFile = null;
+      let runLabel = null;
+
+      if (run && daySnaps.some(s => s.filename === run)) {
+        currFile = run;
+        const allSorted = cd.list.slice().sort((a,b) => (b.createdAt || b.filename).localeCompare(a.createdAt || a.filename));
+        const idx = allSorted.findIndex(s => s.filename === run);
+        prevFile = idx + 1 < allSorted.length ? allSorted[idx + 1].filename : null;
+        const rItem = daySnaps.find(s => s.filename === run);
+        runLabel = `Check at ${new Date(rItem?.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      } else {
+        currFile = daySnaps[0].filename;
+        const dIdx = cd.dates.indexOf(selectedDate);
+        prevFile = dIdx + 1 < cd.dates.length ? cd.byDate.get(cd.dates[dIdx + 1])[0].filename : null;
+      }
+
+      const curr = await storage.getSnapshotContent(targetComp.id, currFile);
+      const prev = prevFile ? await storage.getSnapshotContent(targetComp.id, prevFile) : null;
+      const diff = diffEngine.calculateDiff(prev, curr);
+
+      const runs = daySnaps.map(s => {
+        const timeStr = s.createdAt ? new Date(s.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : s.filename.substring(11, 16);
+        return {
+          filename: s.filename,
+          time: timeStr,
+          createdAt: s.createdAt,
+          totalUrls: s.totalUrls || 0
+        };
+      });
+
+      return res.json({
+        hasData: true,
+        mode: 'day',
+        competitor: targetComp,
+        date: selectedDate,
+        dateLabel: formatHumanDiffDate(selectedDate),
+        run: run || null,
+        runLabel,
+        diff,
+        runs,
+        currentSnapshotMeta: {
+          filename: currFile,
+          timestamp: curr?.timestamp || null,
+          totalUrls: curr?.totalUrls || 0
+        },
+        previousSnapshotMeta: {
+          filename: prevFile,
+          timestamp: prev?.timestamp || null,
+          totalUrls: prev?.totalUrls || 0
+        },
+        availableDates: availableDatesMeta
+      });
+    }
+
+    // All competitors in project
+    let totalAdded = [];
+    let totalRemoved = [];
+    let totalModified = [];
+    let totalUrls = 0;
+    let isFirstRun = false;
+    const compsSummary = [];
+
+    for (const cd of compsData) {
+      if (!cd.byDate.has(selectedDate)) {
+        compsSummary.push({
+          id: cd.comp.id,
+          name: cd.comp.name,
+          added: 0,
+          removed: 0,
+          totalUrls: cd.comp.totalUrls || 0,
+          hasSnapshot: false
+        });
+        continue;
+      }
+
+      const daySnaps = cd.byDate.get(selectedDate);
+      const currFile = daySnaps[0].filename;
+      const dIdx = cd.dates.indexOf(selectedDate);
+      const prevFile = dIdx + 1 < cd.dates.length ? cd.byDate.get(cd.dates[dIdx + 1])[0].filename : null;
+
+      const curr = await storage.getSnapshotContent(cd.comp.id, currFile);
+      const prev = prevFile ? await storage.getSnapshotContent(cd.comp.id, prevFile) : null;
+      const diff = diffEngine.calculateDiff(prev, curr);
+
+      totalUrls += (curr?.totalUrls || 0);
+      if (diff.isFirstRun) isFirstRun = true;
+
+      diff.added.forEach(item => {
+        totalAdded.push({ ...item, competitorId: cd.comp.id, competitorName: cd.comp.name });
+      });
+      diff.removed.forEach(item => {
+        totalRemoved.push({ ...item, competitorId: cd.comp.id, competitorName: cd.comp.name });
+      });
+      diff.modified.forEach(item => {
+        totalModified.push({ ...item, competitorId: cd.comp.id, competitorName: cd.comp.name });
+      });
+
+      compsSummary.push({
+        id: cd.comp.id,
+        name: cd.comp.name,
+        added: diff.added.length,
+        removed: diff.removed.length,
+        totalUrls: curr?.totalUrls || 0,
+        hasSnapshot: true
+      });
+    }
+
+    return res.json({
+      hasData: true,
+      mode: 'day',
+      competitor: { id: 'all', name: 'All Sites in Project' },
+      date: selectedDate,
+      dateLabel: formatHumanDiffDate(selectedDate),
+      diff: {
+        added: totalAdded,
+        removed: totalRemoved,
+        modified: totalModified,
+        isFirstRun: isFirstRun && totalAdded.length === 0 && totalRemoved.length === 0
+      },
+      currentSnapshotMeta: {
+        totalUrls
+      },
+      previousSnapshotMeta: null,
+      availableDates: availableDatesMeta,
+      competitorsSummary: compsSummary,
+      runs: []
+    });
+  } catch (err) {
+    console.error('[PageAlerts Daily Diff Error]:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 4. Crawl Execution (Manual or Automated Vercel Cron)
 app.all(['/api/check/run', '/api/cron/check'], async (req, res) => {
   if (isCheckRunning) {

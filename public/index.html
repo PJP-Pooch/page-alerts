@@ -286,34 +286,67 @@
         <div class="card">
           <div class="card-header flex-wrap">
             <div>
-              <h3>Diff & Changes Explorer</h3>
-              <p class="card-sub">Inspect individual added and removed URLs between snapshots</p>
+              <div class="diff-title-row">
+                <h3>Daily Changes & Diffs</h3>
+                <span class="badge-live-indicator" id="diff-live-badge">Automatic Daily Diff</span>
+              </div>
+              <p class="card-sub" id="diff-subtitle">Automatically showing newly published and removed pages by day</p>
             </div>
             <div class="diff-controls">
               <div class="form-group inline">
-                <label for="diff-select-competitor">Competitor:</label>
+                <label for="diff-select-competitor">Site / Competitor:</label>
                 <select id="diff-select-competitor" class="form-select"></select>
               </div>
               <div class="form-group inline">
-                <label for="diff-select-snap-a">Compare:</label>
-                <select id="diff-select-snap-a" class="form-select">
-                  <option value="latest">Latest Snapshot</option>
-                </select>
+                <label for="diff-select-date">View Day:</label>
+                <select id="diff-select-date" class="form-select"></select>
               </div>
-              <div class="form-group inline">
-                <label for="diff-select-snap-b">Versus:</label>
-                <select id="diff-select-snap-b" class="form-select">
-                  <option value="previous">Previous Snapshot (Yesterday)</option>
-                </select>
+              <div class="form-group inline" id="diff-run-group" style="display: none;">
+                <label for="diff-select-run">Check Run:</label>
+                <select id="diff-select-run" class="form-select"></select>
               </div>
-              <button class="btn btn-secondary btn-sm" id="btn-fetch-diff">Compare</button>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-diff" title="Refresh daily changes">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Day Selector Pills & Context Info -->
+          <div class="diff-day-bar">
+            <div class="diff-day-pills" id="diff-day-pills"></div>
+            <div class="diff-context-info" id="diff-context-info"></div>
+            <button type="button" class="btn-custom-diff-toggle" id="btn-toggle-custom-diff" title="Manually compare specific snapshots">
+              ⚙️ Custom Snapshots
+            </button>
+          </div>
+
+          <!-- Collapsible Custom Snapshot Comparison Drawer (hidden by default) -->
+          <div class="diff-custom-drawer" id="diff-custom-drawer" style="display: none;">
+            <div class="diff-custom-drawer-inner">
+              <div class="diff-custom-header">
+                <span class="diff-custom-title">Manual Snapshot Comparator</span>
+                <span class="text-muted" style="font-size: 0.78rem;">Compare any two specific historical snapshots</span>
+              </div>
+              <div class="diff-custom-controls">
+                <div class="form-group inline">
+                  <label for="diff-select-snap-a">Newer Snapshot:</label>
+                  <select id="diff-select-snap-a" class="form-select"></select>
+                </div>
+                <div class="form-group inline">
+                  <label for="diff-select-snap-b">Baseline / Older Snapshot:</label>
+                  <select id="diff-select-snap-b" class="form-select"></select>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-fetch-diff">Compare Snapshots</button>
+                <button class="btn btn-ghost btn-sm" id="btn-close-custom-diff">Back to Daily View</button>
+              </div>
             </div>
           </div>
 
           <!-- Diff Metric Strip -->
           <div class="diff-metrics-strip" id="diff-metrics-strip">
             <div class="diff-metric-item">
-              <span class="diff-metric-label">Total URLs</span>
+              <span class="diff-metric-label">Total URLs Monitored</span>
               <span class="diff-metric-value" id="diff-total-urls">-</span>
             </div>
             <div class="diff-metric-item green">
@@ -361,7 +394,7 @@
 
           <!-- URL List Container -->
           <div class="diff-urls-list" id="diff-urls-container">
-            <div class="empty-state">Select a competitor and snapshot above to inspect changes.</div>
+            <div class="empty-state">Loading changes...</div>
           </div>
         </div>
       </section>

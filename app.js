@@ -80,8 +80,17 @@ const elements = {
   btnCloseCompModal: document.getElementById('btn-close-comp-modal'),
   btnCancelCompModal: document.getElementById('btn-cancel-comp-modal'),
 
-  // Diff Explorer Tab
+  // Diff Explorer Tab (Daily Diff & Changes)
   diffSelectCompetitor: document.getElementById('diff-select-competitor'),
+  diffSelectDate: document.getElementById('diff-select-date'),
+  diffRunGroup: document.getElementById('diff-run-group'),
+  diffSelectRun: document.getElementById('diff-select-run'),
+  btnRefreshDiff: document.getElementById('btn-refresh-diff'),
+  diffDayPills: document.getElementById('diff-day-pills'),
+  diffContextInfo: document.getElementById('diff-context-info'),
+  btnToggleCustomDiff: document.getElementById('btn-toggle-custom-diff'),
+  diffCustomDrawer: document.getElementById('diff-custom-drawer'),
+  btnCloseCustomDiff: document.getElementById('btn-close-custom-diff'),
   diffSelectCategory: document.getElementById('diff-select-category'),
   diffSelectSnapA: document.getElementById('diff-select-snap-a'),
   diffSelectSnapB: document.getElementById('diff-select-snap-b'),
@@ -90,9 +99,11 @@ const elements = {
   diffAddedCount: document.getElementById('diff-added-count'),
   diffRemovedCount: document.getElementById('diff-removed-count'),
   btnCopyAddedUrls: document.getElementById('btn-copy-added-urls'),
+  btnCopyRemovedUrls: document.getElementById('btn-copy-removed-urls'),
   btnExportDiffCsv: document.getElementById('btn-export-diff-csv'),
   diffFilterTabs: document.querySelectorAll('.filter-tab'),
   diffSearchInput: document.getElementById('diff-search-input'),
+  btnClearDiffSearch: document.getElementById('btn-clear-diff-search'),
   diffUrlsContainer: document.getElementById('diff-urls-container'),
   countFilterAll: document.getElementById('count-filter-all'),
   countFilterAdded: document.getElementById('count-filter-added'),
@@ -682,7 +693,7 @@ function renderCompetitorsList(competitors) {
   });
 }
 
-// ================= Diff Explorer Tab Logic =================
+// ================= Diff Explorer Tab Logic (Automatic Daily Diff) =================
 
 async function setupDiffExplorer() {
   elements.diffSelectCompetitor.innerHTML = '';
@@ -698,6 +709,9 @@ async function setupDiffExplorer() {
       ? `No monitored sites in project "${escapeHtml(curProj.name)}"` 
       : 'No competitors available';
     elements.diffSelectCompetitor.innerHTML = `<option value="">${emptyMsg}</option>`;
+    elements.diffSelectDate.innerHTML = `<option value="">No snapshots</option>`;
+    elements.diffDayPills.innerHTML = '';
+    elements.diffContextInfo.innerHTML = '';
     elements.diffUrlsContainer.innerHTML = `<div class="empty-state">${emptyMsg}. Select another project or add a sitemap.</div>`;
     elements.diffTotalUrls.textContent = '0';
     elements.diffAddedCount.textContent = '+0';
@@ -705,12 +719,20 @@ async function setupDiffExplorer() {
     elements.countFilterAll.textContent = '0';
     elements.countFilterAdded.textContent = '0';
     elements.countFilterRemoved.textContent = '0';
-    elements.diffSelectSnapA.innerHTML = '<option value="">No snapshots</option>';
-    elements.diffSelectSnapB.innerHTML = '<option value="">No snapshots</option>';
     return;
   }
 
   const prevCompId = elements.diffSelectCompetitor.value;
+
+  // "All Sites in this Project" option if multiple sites exist
+  if (comps.length > 1) {
+    const allOpt = document.createElement('option');
+    allOpt.value = 'all';
+    const projName = state.projects.find(p => p.id === state.currentProjectId)?.name || 'Project';
+    allOpt.textContent = `All Sites (${comps.length} sites in ${projName})`;
+    elements.diffSelectCompetitor.appendChild(allOpt);
+  }
+
   comps.forEach(c => {
     const opt = document.createElement('option');
     opt.value = c.id;
@@ -718,14 +740,474 @@ async function setupDiffExplorer() {
     elements.diffSelectCompetitor.appendChild(opt);
   });
 
-  const selectedCompId = comps.some(c => c.id === prevCompId) ? prevCompId : comps[0].id;
+  let selectedCompId = comps[0].id;
+  if (prevCompId === 'all' && comps.length > 1) {
+    selectedCompId = 'all';
+  } else if (comps.some(c => c.id === prevCompId)) {
+    selectedCompId = prevCompId;
+  }
   elements.diffSelectCompetitor.value = selectedCompId;
-  await loadCompetitorSnapshots(selectedCompId);
+
+  // Automatically load the daily changes!
+  await loadDailyDiff(selectedCompId, state.diffSelectedDate || 'latest');
+
+  if (selectedCompId !== 'all') {
+    populateCustomSnapshots(selectedCompId);
+  }
 }
 
-async function loadCompetitorSnapshots(competitorId) {
+async function loadDailyDiff(competitorId, date = 'latest', run = null) {
   if (!competitorId) return;
 
+  elements.diffUrlsContainer.innerHTML = '<div class="empty-state">Loading changes...</div>';
+
+  try {
+    const pId = state.currentProjectId || 'all';
+    const query = new URLSearchParams({
+      competitorId,
+      projectId: pId,
+      date: date || 'latest'
+    });
+    if (run) query.append('run', run);
+
+    const res = await fetch(`/api/diff/daily?${query.toString()}`);
+    const data = await res.json();
+    state.currentDiffData = data;
+
+    if (!data.hasData) {
+      elements.diffUrlsContainer.innerHTML = `<div class="empty-state">${escapeHtml(data.message || 'No snapshots recorded yet.')}</div>`;
+      elements.diffTotalUrls.textContent = '0';
+      elements.diffAddedCount.textContent = '+0';
+      elements.diffRemovedCount.textContent = '-0';
+      elements.countFilterAll.textContent = '0';
+      elements.countFilterAdded.textContent = '0';
+      elements.countFilterRemoved.textContent = '0';
+      elements.diffSelectDate.innerHTML = '<option value="">No snapshots</option>';
+      elements.diffDayPills.innerHTML = '';
+      elements.diffContextInfo.innerHTML = '';
+      if (elements.diffRunGroup) elements.diffRunGroup.style.display = 'none';
+      return;
+    }
+
+    // Populate Date Dropdown
+    elements.diffSelectDate.innerHTML = '';
+    const feedOpt = document.createElement('option');
+    feedOpt.value = 'all';
+    feedOpt.textContent = '📅 All Recent Days (Timeline Feed)';
+    elements.diffSelectDate.appendChild(feedOpt);
+
+    data.availableDates.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d.date;
+      opt.textContent = `📅 ${d.label}`;
+      elements.diffSelectDate.appendChild(opt);
+    });
+
+    const activeDateValue = data.mode === 'feed' ? 'all' : data.date;
+    elements.diffSelectDate.value = activeDateValue;
+    state.diffSelectedDate = activeDateValue;
+
+    // Render Quick Day Selector Pills
+    renderDayPills(data.availableDates, activeDateValue);
+
+    // Runs Dropdown (if multiple checks took place on that day)
+    if (data.runs && data.runs.length > 1 && data.mode !== 'feed') {
+      elements.diffRunGroup.style.display = 'flex';
+      elements.diffSelectRun.innerHTML = '<option value="">Full Day (Net Changes)</option>';
+      data.runs.forEach(r => {
+        const rOpt = document.createElement('option');
+        rOpt.value = r.filename;
+        rOpt.textContent = `Check at ${r.time} (${r.totalUrls.toLocaleString()} URLs)`;
+        elements.diffSelectRun.appendChild(rOpt);
+      });
+      elements.diffSelectRun.value = run || '';
+    } else {
+      elements.diffRunGroup.style.display = 'none';
+    }
+
+    // Context Info Banner
+    if (data.mode === 'feed') {
+      elements.diffContextInfo.innerHTML = `<span>Showing changes across <strong>all recent days</strong></span>`;
+    } else if (data.diff?.isFirstRun) {
+      elements.diffContextInfo.innerHTML = `<span>🌱 <strong>Initial Baseline Snapshot</strong> on ${escapeHtml(data.dateLabel)}</span>`;
+    } else if (data.runLabel) {
+      elements.diffContextInfo.innerHTML = `<span>📅 Changes for <strong class="diff-context-highlight">${escapeHtml(data.dateLabel)}</strong> (${escapeHtml(data.runLabel)})</span>`;
+    } else {
+      const prevInfo = data.previousSnapshotMeta?.timestamp 
+        ? `compared against ${formatDate(data.previousSnapshotMeta.timestamp)} baseline`
+        : 'compared against previous day baseline';
+      elements.diffContextInfo.innerHTML = `<span>📅 Changes for <strong class="diff-context-highlight">${escapeHtml(data.dateLabel)}</strong> • <span class="text-muted">${prevInfo}</span></span>`;
+    }
+
+    // Metrics Strip
+    if (data.mode === 'feed') {
+      let feedAdded = 0;
+      let feedRemoved = 0;
+      data.days.forEach(d => {
+        feedAdded += (d.diff?.added?.length || 0);
+        feedRemoved += (d.diff?.removed?.length || 0);
+      });
+      elements.diffTotalUrls.textContent = (data.days[0]?.totalUrls || 0).toLocaleString();
+      elements.diffAddedCount.textContent = `+${feedAdded}`;
+      elements.diffRemovedCount.textContent = `-${feedRemoved}`;
+      elements.countFilterAll.textContent = feedAdded + feedRemoved;
+      elements.countFilterAdded.textContent = feedAdded;
+      elements.countFilterRemoved.textContent = feedRemoved;
+    } else {
+      const addedCount = data.diff?.added?.length || 0;
+      const removedCount = data.diff?.removed?.length || 0;
+      const totalUrls = data.currentSnapshotMeta?.totalUrls || 0;
+
+      elements.diffTotalUrls.textContent = totalUrls.toLocaleString();
+      elements.diffAddedCount.textContent = `+${addedCount}`;
+      elements.diffRemovedCount.textContent = `-${removedCount}`;
+      elements.countFilterAll.textContent = addedCount + removedCount;
+      elements.countFilterAdded.textContent = addedCount;
+      elements.countFilterRemoved.textContent = removedCount;
+    }
+
+    // Categories dropdown
+    populateCategoriesDropdown(data);
+
+    // Render list
+    renderDiffList();
+
+    // Update manual snapshots in drawer for current competitor
+    if (competitorId !== 'all') {
+      populateCustomSnapshots(competitorId);
+    }
+  } catch (err) {
+    console.error('Failed to load daily diff:', err);
+    elements.diffUrlsContainer.innerHTML = `<div class="empty-state text-red">Error loading changes: ${err.message}</div>`;
+  }
+}
+
+function renderDayPills(availableDates, activeDate) {
+  elements.diffDayPills.innerHTML = '';
+  if (!availableDates || availableDates.length === 0) return;
+
+  const pillsToShow = [];
+
+  const todayItem = availableDates.find(d => d.isToday);
+  if (todayItem) {
+    pillsToShow.push({ label: 'Today', date: todayItem.date });
+  }
+
+  const yestItem = availableDates.find(d => d.isYesterday);
+  if (yestItem) {
+    pillsToShow.push({ label: 'Yesterday', date: yestItem.date });
+  }
+
+  availableDates.forEach(d => {
+    if (!d.isToday && !d.isYesterday && pillsToShow.length < 4) {
+      const shortLabel = d.label.split(',')[0].trim();
+      pillsToShow.push({ label: shortLabel, date: d.date });
+    }
+  });
+
+  pillsToShow.push({ label: 'All Days', date: 'all' });
+
+  pillsToShow.forEach(p => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `day-pill ${activeDate === p.date ? 'active' : ''}`;
+    btn.textContent = p.label;
+    btn.addEventListener('click', () => {
+      elements.diffSelectDate.value = p.date;
+      state.diffSelectedDate = p.date;
+      loadDailyDiff(elements.diffSelectCompetitor.value, p.date);
+    });
+    elements.diffDayPills.appendChild(btn);
+  });
+}
+
+function populateCategoriesDropdown(data) {
+  const categories = new Set();
+
+  function scanItems(items) {
+    if (!items) return;
+    items.forEach(item => {
+      if (typeof item === 'object' && item.category) categories.add(item.category);
+    });
+  }
+
+  if (data.mode === 'feed') {
+    data.days.forEach(d => {
+      scanItems(d.diff?.added);
+      scanItems(d.diff?.removed);
+    });
+  } else {
+    scanItems(data.diff?.added);
+    scanItems(data.diff?.removed);
+  }
+
+  const prevCat = elements.diffSelectCategory.value;
+  elements.diffSelectCategory.innerHTML = '<option value="all">All Page Types</option>';
+  categories.forEach(cat => {
+    const opt = document.createElement('option');
+    opt.value = cat;
+    opt.textContent = cat;
+    elements.diffSelectCategory.appendChild(opt);
+  });
+
+  if (categories.has(prevCat)) {
+    elements.diffSelectCategory.value = prevCat;
+  }
+}
+
+function renderDiffList() {
+  if (!state.currentDiffData) {
+    elements.diffUrlsContainer.innerHTML = '<div class="empty-state">No diff data loaded.</div>';
+    return;
+  }
+
+  const data = state.currentDiffData;
+  const selectedCat = elements.diffSelectCategory.value;
+  const query = (state.currentDiffSearch || '').toLowerCase().trim();
+
+  function filterAndBuildItemsHtml(addedList, removedList) {
+    let items = [];
+    (addedList || []).forEach(u => {
+      const urlStr = typeof u === 'string' ? u : u.url;
+      const category = typeof u === 'object' ? u.category : 'General';
+      const competitorName = typeof u === 'object' ? u.competitorName : null;
+      items.push({ url: urlStr, category, competitorName, type: 'added' });
+    });
+    (removedList || []).forEach(u => {
+      const urlStr = typeof u === 'string' ? u : u.url;
+      const category = typeof u === 'object' ? u.category : 'General';
+      const competitorName = typeof u === 'object' ? u.competitorName : null;
+      items.push({ url: urlStr, category, competitorName, type: 'removed' });
+    });
+
+    if (state.currentDiffFilter === 'added') {
+      items = items.filter(i => i.type === 'added');
+    } else if (state.currentDiffFilter === 'removed') {
+      items = items.filter(i => i.type === 'removed');
+    }
+
+    if (selectedCat && selectedCat !== 'all') {
+      items = items.filter(i => i.category === selectedCat);
+    }
+
+    if (query) {
+      items = items.filter(i => i.url.toLowerCase().includes(query));
+    }
+
+    return items;
+  }
+
+  function renderCard(item) {
+    const isAdded = item.type === 'added';
+    return `
+      <div class="diff-url-card ${item.type}">
+        <span class="diff-tag ${item.type}">${isAdded ? '+ ADDED' : '- REMOVED'}</span>
+        ${item.competitorName ? `<span class="badge-competitor">${escapeHtml(item.competitorName)}</span>` : ''}
+        ${item.category && item.category !== 'General' ? `<span class="badge-category">${escapeHtml(item.category)}</span>` : ''}
+        <span class="diff-url-text" title="${escapeHtml(item.url)}">${escapeHtml(item.url)}</span>
+        <div class="diff-url-actions">
+          <button class="btn btn-secondary btn-xs btn-copy-single-url" data-url="${escapeHtml(item.url)}" title="Copy URL">
+            Copy
+          </button>
+          <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener" class="btn btn-secondary btn-xs" title="Open page">
+            Open ↗
+          </a>
+        </div>
+      </div>
+    `;
+  }
+
+  // 1. Multi-day Feed Mode
+  if (data.mode === 'feed') {
+    let html = '';
+
+    data.days.forEach(day => {
+      const items = filterAndBuildItemsHtml(day.diff?.added, day.diff?.removed);
+      const hasDayChanges = (day.diff?.added?.length > 0 || day.diff?.removed?.length > 0);
+
+      html += `
+        <div class="diff-day-group">
+          <div class="diff-day-header">
+            <span class="diff-day-header-title">
+              📅 ${escapeHtml(day.dateLabel)}
+            </span>
+            <span class="diff-day-header-counts">
+              <span class="text-green">+${day.diff?.added?.length || 0} added</span>
+              <span class="text-red">-${day.diff?.removed?.length || 0} removed</span>
+            </span>
+          </div>
+      `;
+
+      if (day.diff?.isFirstRun) {
+        html += `
+          <div class="empty-state" style="padding: 12px; margin-bottom: 8px;">
+            🌱 <strong>Baseline Snapshot Established</strong> (${(day.totalUrls || 0).toLocaleString()} URLs).
+          </div>
+        `;
+      } else if (!hasDayChanges) {
+        html += `
+          <div class="empty-state text-muted" style="padding: 12px; margin-bottom: 8px;">
+            ✅ No URL changes recorded on this day.
+          </div>
+        `;
+      } else if (items.length === 0) {
+        html += `
+          <div class="empty-state text-muted" style="padding: 12px; margin-bottom: 8px;">
+            No URLs on this day match the active filter or search query.
+          </div>
+        `;
+      } else {
+        items.forEach(item => {
+          html += renderCard(item);
+        });
+      }
+
+      html += `</div>`;
+    });
+
+    elements.diffUrlsContainer.innerHTML = html;
+    attachCopyListeners();
+    return;
+  }
+
+  // 2. Single Day View (or Custom Diff)
+  const diff = data.diff;
+  if (!diff) {
+    elements.diffUrlsContainer.innerHTML = '<div class="empty-state">No diff details available.</div>';
+    return;
+  }
+
+  if (diff.isFirstRun) {
+    const totalCount = data.currentSnapshotMeta?.totalUrls || 0;
+    elements.diffUrlsContainer.innerHTML = `
+      <div class="empty-state">
+        🌱 <strong>Initial Baseline Snapshot Established</strong><br>
+        All ${totalCount.toLocaleString()} URLs were indexed as the starting baseline for this day.
+        Future daily checks will detect additions and removals against this version!
+      </div>
+    `;
+    return;
+  }
+
+  const items = filterAndBuildItemsHtml(diff.added, diff.removed);
+
+  if (items.length === 0) {
+    const hasAny = (diff.added?.length > 0 || diff.removed?.length > 0);
+    elements.diffUrlsContainer.innerHTML = `
+      <div class="empty-state">
+        ${!hasAny ? '✅ No changes detected on this day. Sitemaps were stable and identical!' : 'No URLs match the current filter or search query.'}
+      </div>
+    `;
+    return;
+  }
+
+  let html = '';
+  items.forEach(item => {
+    html += renderCard(item);
+  });
+
+  elements.diffUrlsContainer.innerHTML = html;
+  attachCopyListeners();
+}
+
+function attachCopyListeners() {
+  elements.diffUrlsContainer.querySelectorAll('.btn-copy-single-url').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const u = btn.getAttribute('data-url');
+      navigator.clipboard.writeText(u);
+      showToast('URL copied to clipboard', 'success');
+    });
+  });
+}
+
+function copyAddedUrlsToClipboard() {
+  if (!state.currentDiffData) {
+    showToast('No diff data available', 'error');
+    return;
+  }
+
+  const addedUrls = [];
+  if (state.currentDiffData.mode === 'feed') {
+    state.currentDiffData.days.forEach(d => {
+      (d.diff?.added || []).forEach(u => addedUrls.push(typeof u === 'string' ? u : u.url));
+    });
+  } else if (state.currentDiffData.diff?.added) {
+    state.currentDiffData.diff.added.forEach(u => addedUrls.push(typeof u === 'string' ? u : u.url));
+  }
+
+  if (addedUrls.length === 0) {
+    showToast('No added URLs to copy', 'info');
+    return;
+  }
+
+  navigator.clipboard.writeText(addedUrls.join('\n'));
+  showToast(`Copied ${addedUrls.length} added URLs to clipboard!`, 'success');
+}
+
+function copyRemovedUrlsToClipboard() {
+  if (!state.currentDiffData) {
+    showToast('No diff data available', 'error');
+    return;
+  }
+
+  const removedUrls = [];
+  if (state.currentDiffData.mode === 'feed') {
+    state.currentDiffData.days.forEach(d => {
+      (d.diff?.removed || []).forEach(u => removedUrls.push(typeof u === 'string' ? u : u.url));
+    });
+  } else if (state.currentDiffData.diff?.removed) {
+    state.currentDiffData.diff.removed.forEach(u => removedUrls.push(typeof u === 'string' ? u : u.url));
+  }
+
+  if (removedUrls.length === 0) {
+    showToast('No removed URLs to copy', 'info');
+    return;
+  }
+
+  navigator.clipboard.writeText(removedUrls.join('\n'));
+  showToast(`Copied ${removedUrls.length} removed URLs to clipboard!`, 'success');
+}
+
+function exportDiffCsv() {
+  if (!state.currentDiffData) {
+    showToast('No diff data available', 'error');
+    return;
+  }
+
+  let csvContent = 'Type,URL,Category,Competitor,Date\n';
+  const compName = elements.diffSelectCompetitor.options[elements.diffSelectCompetitor.selectedIndex]?.text || 'Competitor';
+
+  function appendRow(type, item, dateStr) {
+    const url = typeof item === 'string' ? item : item.url;
+    const cat = typeof item === 'object' ? (item.category || 'General') : 'General';
+    const cName = (typeof item === 'object' && item.competitorName) ? item.competitorName : compName;
+    csvContent += `"${type}","${url.replace(/"/g, '""')}","${cat.replace(/"/g, '""')}","${cName.replace(/"/g, '""')}","${dateStr}"\n`;
+  }
+
+  if (state.currentDiffData.mode === 'feed') {
+    state.currentDiffData.days.forEach(d => {
+      (d.diff?.added || []).forEach(u => appendRow('Added', u, d.date));
+      (d.diff?.removed || []).forEach(u => appendRow('Removed', u, d.date));
+    });
+  } else if (state.currentDiffData.diff) {
+    const dateStr = state.currentDiffData.date || '';
+    (state.currentDiffData.diff.added || []).forEach(u => appendRow('Added', u, dateStr));
+    (state.currentDiffData.diff.removed || []).forEach(u => appendRow('Removed', u, dateStr));
+  }
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', `page_alerts_diff_${Date.now()}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  showToast('Exported CSV successfully', 'success');
+}
+
+async function populateCustomSnapshots(competitorId) {
+  if (!competitorId || competitorId === 'all') return;
   try {
     const res = await fetch(`/api/competitors/${competitorId}/snapshots`);
     const snapshots = await res.json();
@@ -747,195 +1229,54 @@ async function loadCompetitorSnapshots(competitorId) {
       if (idx === 1) optB.selected = true;
       elements.diffSelectSnapB.appendChild(optB);
     });
-
-    await fetchAndRenderDiff(competitorId, elements.diffSelectSnapA.value, elements.diffSelectSnapB.value);
   } catch (err) {
-    console.error('Failed to load snapshots:', err);
+    console.error('Failed to populate custom snapshots:', err);
   }
 }
 
-async function fetchAndRenderDiff(compId, snapA, snapB) {
-  elements.diffUrlsContainer.innerHTML = '<div class="empty-state">Computing difference...</div>';
+async function fetchCustomSnapshotDiff() {
+  const compId = elements.diffSelectCompetitor.value;
+  if (!compId || compId === 'all') {
+    showToast('Please select a specific site for custom comparison.', 'error');
+    return;
+  }
+  const snapA = elements.diffSelectSnapA.value;
+  const snapB = elements.diffSelectSnapB.value;
+
+  elements.diffUrlsContainer.innerHTML = '<div class="empty-state">Computing difference between selected snapshots...</div>';
 
   try {
     const url = `/api/competitors/${compId}/diff?snapA=${encodeURIComponent(snapA)}&snapB=${encodeURIComponent(snapB)}`;
     const res = await fetch(url);
     const data = await res.json();
-    state.currentDiffData = data;
+    state.currentDiffData = {
+      mode: 'day',
+      dateLabel: `Custom Comparison: ${snapA} vs ${snapB}`,
+      diff: data.diff,
+      currentSnapshotMeta: data.currentSnapshotMeta,
+      previousSnapshotMeta: data.previousSnapshotMeta,
+      availableDates: state.currentDiffData?.availableDates || []
+    };
 
-    const diff = data.diff;
-    const addedCount = diff.added?.length || 0;
-    const removedCount = diff.removed?.length || 0;
-    const totalCurrent = data.currentSnapshotMeta?.totalUrls || 0;
+    const addedCount = data.diff?.added?.length || 0;
+    const removedCount = data.diff?.removed?.length || 0;
+    const totalUrls = data.currentSnapshotMeta?.totalUrls || 0;
 
-    elements.diffTotalUrls.textContent = totalCurrent.toLocaleString();
+    elements.diffTotalUrls.textContent = totalUrls.toLocaleString();
     elements.diffAddedCount.textContent = `+${addedCount}`;
     elements.diffRemovedCount.textContent = `-${removedCount}`;
-
     elements.countFilterAll.textContent = addedCount + removedCount;
     elements.countFilterAdded.textContent = addedCount;
     elements.countFilterRemoved.textContent = removedCount;
 
-    // Populate category dropdown
-    const categories = new Set();
-    if (diff.added) {
-      diff.added.forEach(item => {
-        if (typeof item === 'object' && item.category) categories.add(item.category);
-      });
-    }
-    if (diff.removed) {
-      diff.removed.forEach(item => {
-        if (typeof item === 'object' && item.category) categories.add(item.category);
-      });
-    }
+    elements.diffContextInfo.innerHTML = `<span>⚙️ <strong>Custom Snapshot Comparison</strong> • ${escapeHtml(snapA)} vs ${escapeHtml(snapB)}</span>`;
 
-    elements.diffSelectCategory.innerHTML = '<option value="all">All Page Types</option>';
-    categories.forEach(cat => {
-      const opt = document.createElement('option');
-      opt.value = cat;
-      opt.textContent = cat;
-      elements.diffSelectCategory.appendChild(opt);
-    });
-
+    populateCategoriesDropdown(state.currentDiffData);
     renderDiffList();
   } catch (err) {
-    console.error('Failed to fetch diff:', err);
-    elements.diffUrlsContainer.innerHTML = `<div class="empty-state text-red">Error calculating diff: ${err.message}</div>`;
+    console.error('Custom diff failed:', err);
+    elements.diffUrlsContainer.innerHTML = `<div class="empty-state text-red">Error calculating custom diff: ${err.message}</div>`;
   }
-}
-
-function renderDiffList() {
-  if (!state.currentDiffData || !state.currentDiffData.diff) {
-    elements.diffUrlsContainer.innerHTML = '<div class="empty-state">No diff data loaded.</div>';
-    return;
-  }
-
-  const diff = state.currentDiffData.diff;
-  if (diff.isFirstRun) {
-    elements.diffUrlsContainer.innerHTML = `
-      <div class="empty-state">
-        🌱 <strong>Initial Baseline Snapshot</strong><br>
-        All ${state.currentDiffData.currentSnapshotMeta.totalUrls.toLocaleString()} URLs were indexed across sub-sitemaps as the starting baseline.
-        Future daily checks will detect additions and removals against this version!
-      </div>
-    `;
-    return;
-  }
-
-  let items = [];
-  diff.added.forEach(u => {
-    const urlStr = typeof u === 'string' ? u : u.url;
-    const category = typeof u === 'object' ? u.category : 'General';
-    items.push({ url: urlStr, category, type: 'added' });
-  });
-  diff.removed.forEach(u => {
-    const urlStr = typeof u === 'string' ? u : u.url;
-    const category = typeof u === 'object' ? u.category : 'General';
-    items.push({ url: urlStr, category, type: 'removed' });
-  });
-
-  // Apply Action Filter (added / removed / all)
-  if (state.currentDiffFilter === 'added') {
-    items = items.filter(i => i.type === 'added');
-  } else if (state.currentDiffFilter === 'removed') {
-    items = items.filter(i => i.type === 'removed');
-  }
-
-  // Apply Category Filter
-  const selectedCat = elements.diffSelectCategory.value;
-  if (selectedCat && selectedCat !== 'all') {
-    items = items.filter(i => i.category === selectedCat);
-  }
-
-  // Apply Search
-  const query = state.currentDiffSearch.toLowerCase().trim();
-  if (query) {
-    items = items.filter(i => i.url.toLowerCase().includes(query));
-  }
-
-  if (items.length === 0) {
-    elements.diffUrlsContainer.innerHTML = `
-      <div class="empty-state">
-        ${diff.added.length === 0 && diff.removed.length === 0 ? '✅ No changes detected between these two snapshots. Sitemaps are identical!' : 'No URLs match the current filter or search query.'}
-      </div>
-    `;
-    return;
-  }
-
-  let html = '';
-  items.forEach(item => {
-    const isAdded = item.type === 'added';
-    html += `
-      <div class="diff-url-card ${item.type}">
-        <span class="diff-tag ${item.type}">${isAdded ? '+ ADDED' : '- REMOVED'}</span>
-        ${item.category && item.category !== 'General' ? `<span class="badge-category">${escapeHtml(item.category)}</span>` : ''}
-        <span class="diff-url-text" title="${escapeHtml(item.url)}">${escapeHtml(item.url)}</span>
-        <div class="diff-url-actions">
-          <button class="btn btn-secondary btn-xs btn-copy-single-url" data-url="${escapeHtml(item.url)}" title="Copy URL">
-            Copy
-          </button>
-          <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener" class="btn btn-secondary btn-xs" title="Open page">
-            Open ↗
-          </a>
-        </div>
-      </div>
-    `;
-  });
-
-  elements.diffUrlsContainer.innerHTML = html;
-
-  elements.diffUrlsContainer.querySelectorAll('.btn-copy-single-url').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const u = btn.getAttribute('data-url');
-      navigator.clipboard.writeText(u);
-      showToast('URL copied to clipboard', 'success');
-    });
-  });
-}
-
-// Copy Added URLs & CSV Export
-function copyAddedUrlsToClipboard() {
-  if (!state.currentDiffData?.diff?.added) {
-    showToast('No diff data available', 'error');
-    return;
-  }
-  const added = state.currentDiffData.diff.added;
-  if (added.length === 0) {
-    showToast('No added URLs to copy', 'info');
-    return;
-  }
-
-  navigator.clipboard.writeText(added.join('\n'));
-  showToast(`Copied ${added.length} added URLs to clipboard!`, 'success');
-}
-
-function exportDiffCsv() {
-  if (!state.currentDiffData?.diff) {
-    showToast('No diff data available', 'error');
-    return;
-  }
-
-  const diff = state.currentDiffData.diff;
-  let csvContent = 'Type,URL,Competitor\n';
-
-  const compName = elements.diffSelectCompetitor.options[elements.diffSelectCompetitor.selectedIndex]?.text || 'Competitor';
-
-  diff.added.forEach(u => {
-    csvContent += `Added,"${u.replace(/"/g, '""')}","${compName.replace(/"/g, '""')}"\n`;
-  });
-  diff.removed.forEach(u => {
-    csvContent += `Removed,"${u.replace(/"/g, '""')}","${compName.replace(/"/g, '""')}"\n`;
-  });
-
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', `page_alerts_diff_${Date.now()}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  showToast('Exported CSV successfully', 'success');
 }
 
 // ================= History Tab =================
@@ -1619,22 +1960,45 @@ function setupEventListeners() {
     }
   });
 
-  // Diff Explorer Controls
-  elements.diffSelectCompetitor.addEventListener('change', () => {
-    loadCompetitorSnapshots(elements.diffSelectCompetitor.value);
+  // Diff Explorer Controls (Automatic Daily Diff)
+  elements.diffSelectCompetitor?.addEventListener('change', () => {
+    loadDailyDiff(elements.diffSelectCompetitor.value, state.diffSelectedDate || 'latest');
   });
 
-  elements.btnFetchDiff.addEventListener('click', () => {
-    fetchAndRenderDiff(
-      elements.diffSelectCompetitor.value,
-      elements.diffSelectSnapA.value,
-      elements.diffSelectSnapB.value
-    );
+  elements.diffSelectDate?.addEventListener('change', () => {
+    state.diffSelectedDate = elements.diffSelectDate.value;
+    loadDailyDiff(elements.diffSelectCompetitor.value, elements.diffSelectDate.value);
   });
 
-  elements.diffSelectCategory.addEventListener('change', renderDiffList);
-  elements.btnCopyAddedUrls.addEventListener('click', copyAddedUrlsToClipboard);
-  elements.btnExportDiffCsv.addEventListener('click', exportDiffCsv);
+  elements.diffSelectRun?.addEventListener('change', () => {
+    loadDailyDiff(elements.diffSelectCompetitor.value, elements.diffSelectDate.value, elements.diffSelectRun.value);
+  });
+
+  elements.btnRefreshDiff?.addEventListener('click', () => {
+    loadDailyDiff(elements.diffSelectCompetitor.value, elements.diffSelectDate.value, elements.diffSelectRun.value);
+    showToast('Refreshed daily changes!', 'info');
+  });
+
+  // Toggle Custom Snapshot Comparison Drawer
+  elements.btnToggleCustomDiff?.addEventListener('click', () => {
+    const isHidden = elements.diffCustomDrawer.style.display === 'none';
+    elements.diffCustomDrawer.style.display = isHidden ? 'block' : 'none';
+    if (isHidden && elements.diffSelectCompetitor.value !== 'all') {
+      populateCustomSnapshots(elements.diffSelectCompetitor.value);
+    }
+  });
+
+  elements.btnCloseCustomDiff?.addEventListener('click', () => {
+    elements.diffCustomDrawer.style.display = 'none';
+    loadDailyDiff(elements.diffSelectCompetitor.value, state.diffSelectedDate || 'latest');
+  });
+
+  elements.btnFetchDiff?.addEventListener('click', fetchCustomSnapshotDiff);
+
+  elements.diffSelectCategory?.addEventListener('change', renderDiffList);
+  elements.btnCopyAddedUrls?.addEventListener('click', copyAddedUrlsToClipboard);
+  elements.btnCopyRemovedUrls?.addEventListener('click', copyRemovedUrlsToClipboard);
+  elements.btnExportDiffCsv?.addEventListener('click', exportDiffCsv);
 
   // Filter tabs in Diff Explorer
   elements.diffFilterTabs.forEach(tab => {
@@ -1646,8 +2010,18 @@ function setupEventListeners() {
     });
   });
 
-  elements.diffSearchInput.addEventListener('input', e => {
+  elements.diffSearchInput?.addEventListener('input', e => {
     state.currentDiffSearch = e.target.value;
+    if (elements.btnClearDiffSearch) {
+      elements.btnClearDiffSearch.style.display = e.target.value ? 'inline-block' : 'none';
+    }
+    renderDiffList();
+  });
+
+  elements.btnClearDiffSearch?.addEventListener('click', () => {
+    elements.diffSearchInput.value = '';
+    state.currentDiffSearch = '';
+    elements.btnClearDiffSearch.style.display = 'none';
     renderDiffList();
   });
 
